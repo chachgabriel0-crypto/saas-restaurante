@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1a0a2e">
+<title>Super Admin — Restaurante POS SaaS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ============================================================
+   DESIGN TOKENS — SUPER ADMIN DARK THEME
+   ============================================================ */
+:root {
+  --bg:     #0d0d1a;
+  --bg2:    #13132a;
+  --bg3:    #1c1c3a;
+  --border: rgba(255,255,255,.08);
+  --accent: #7c3aed;
+  --accent2:#4f46e5;
+  --green:  #10b981;
+  --red:    #ef4444;
+  --amber:  #f59e0b;
+  --blue:   #3b82f6;
+  --white:  #f0f0ff;
+  --gray:   #9090b0;
+  --r:      12px;
+  --tr:     all .2s ease;
+  --sh:     0 8px 32px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--white);min-height:100vh;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--accent);border-radius:3px}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+#login-screen{
+  display:flex;align-items:center;justify-content:center;min-height:100vh;
+  background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(124,58,237,.3),transparent 60%),
+             linear-gradient(160deg,#0d0d1a,#1a0a2e,#0d1a2e);
+  padding:20px;
+}
+.login-card{
+  background:linear-gradient(135deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+  border:1px solid var(--border);
+  border-radius:24px;
+  padding:52px 44px;
+  width:100%;max-width:440px;
+  backdrop-filter:blur(20px);
+  box-shadow:0 32px 80px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.06);
+}
+.login-crown{font-size:3.2rem;text-align:center;margin-bottom:6px;display:block;filter:drop-shadow(0 0 20px rgba(124,58,237,.8))}
+.login-title{font-size:1.65rem;font-weight:900;text-align:center;background:linear-gradient(135deg,#c4b5fd,#818cf8,#38bdf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+.login-sub{text-align:center;color:var(--gray);font-size:.85rem;margin-bottom:36px}
+.fg{margin-bottom:18px}
+.fg label{display:block;font-size:.75rem;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px}
+.fg input{
+  width:100%;padding:13px 16px;
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--border);
+  border-radius:10px;
+  color:var(--white);font-size:.95rem;font-family:inherit;outline:none;
+  transition:var(--tr);
+}
+.fg input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,58,237,.2);background:rgba(124,58,237,.06)}
+.btn-login{
+  width:100%;padding:14px;border:none;border-radius:10px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;font-size:.98rem;font-weight:700;cursor:pointer;font-family:inherit;
+  transition:var(--tr);box-shadow:0 4px 20px rgba(124,58,237,.4);
+}
+.btn-login:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(124,58,237,.55)}
+.login-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:8px;padding:10px 14px;font-size:.84rem;margin-bottom:14px;display:none}
+
+/* ============================================================
+   APP LAYOUT
+   ============================================================ */
+#app{display:none;min-height:100vh;flex-direction:column}
+.topbar{
+  background:rgba(13,13,26,.9);
+  backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 28px;height:64px;
+  position:sticky;top:0;z-index:100;
+}
+.topbar-brand{display:flex;align-items:center;gap:12px}
+.topbar-brand span.crown{font-size:1.4rem;filter:drop-shadow(0 0 10px rgba(124,58,237,.8))}
+.topbar-brand h1{font-size:1.1rem;font-weight:800;background:linear-gradient(135deg,#c4b5fd,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.topbar-brand p{font-size:.73rem;color:var(--gray);margin-top:1px}
+.topbar-right{display:flex;align-items:center;gap:16px}
+.user-pill{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:40px;padding:6px 14px 6px 10px;font-size:.83rem}
+.user-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.btn-logout{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.2);color:#fca5a5;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:.83rem;font-family:inherit;transition:var(--tr)}
+.btn-logout:hover{background:rgba(239,68,68,.22)}
+
+/* NAV TABS */
+.nav-tabs{display:flex;gap:4px;padding:0 28px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.nav-tab{padding:14px 20px;border:none;border-bottom:2px solid transparent;background:none;color:var(--gray);font-size:.85rem;font-weight:500;cursor:pointer;font-family:inherit;transition:var(--tr);white-space:nowrap}
+.nav-tab:hover{color:var(--white)}
+.nav-tab.active{color:#a78bfa;border-bottom-color:#7c3aed;font-weight:700}
+
+/* MAIN */
+.main{padding:28px;flex:1;max-width:1400px;margin:0 auto;width:100%}
+
+/* STAT CARDS */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{
+  background:linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.01));
+  border:1px solid var(--border);border-radius:var(--r);padding:22px 20px;
+  position:relative;overflow:hidden;transition:var(--tr);
+}
+.stat-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--accent-clr,rgba(124,58,237,.08)),transparent);pointer-events:none}
+.stat-card:hover{border-color:rgba(255,255,255,.15);transform:translateY(-2px)}
+.stat-icon{font-size:1.6rem;margin-bottom:12px}
+.stat-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--gray);margin-bottom:4px}
+.stat-value{font-size:2rem;font-weight:900;color:var(--white)}
+.stat-sub{font-size:.74rem;color:var(--gray);margin-top:3px}
+
+/* SECTION HEADER */
+.section-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap}
+.section-title{font-size:1.25rem;font-weight:800}
+.section-sub{font-size:.82rem;color:var(--gray);margin-top:2px}
+
+/* CARDS / TABLE */
+.card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:var(--r);padding:20px}
+.empresa-card{
+  background:linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.01));
+  border:1px solid var(--border);border-radius:var(--r);
+  padding:20px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  transition:var(--tr);margin-bottom:12px;
+}
+.empresa-card:hover{border-color:rgba(124,58,237,.4);background:rgba(124,58,237,.06)}
+.empresa-logo{width:52px;height:52px;border-radius:10px;object-fit:cover;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0}
+.empresa-logo img{width:100%;height:100%;border-radius:10px;object-fit:cover}
+.empresa-info{flex:1;min-width:160px}
+.empresa-name{font-size:1rem;font-weight:700;margin-bottom:3px}
+.empresa-meta{font-size:.75rem;color:var(--gray)}
+.empresa-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:.73rem;font-weight:600}
+.badge-green{background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.2)}
+.badge-red{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.2)}
+.badge-amber{background:rgba(245,158,11,.15);color:#fcd34d;border:1px solid rgba(245,158,11,.2)}
+.badge-blue{background:rgba(59,130,246,.15);color:#93c5fd;border:1px solid rgba(59,130,246,.2)}
+.badge-purple{background:rgba(124,58,237,.15);color:#c4b5fd;border:1px solid rgba(124,58,237,.2)}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:8px;font-family:inherit;font-size:.83rem;font-weight:600;cursor:pointer;border:none;transition:var(--tr)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 4px 16px rgba(124,58,237,.3)}
+.btn-primary:hover{opacity:.85;transform:translateY(-1px)}
+.btn-success{background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.2)}
+.btn-success:hover{background:rgba(16,185,129,.25)}
+.btn-danger{background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.2)}
+.btn-danger:hover{background:rgba(239,68,68,.22)}
+.btn-secondary{background:rgba(255,255,255,.06);color:var(--white);border:1px solid var(--border)}
+.btn-secondary:hover{background:rgba(255,255,255,.12)}
+.btn-sm{padding:6px 12px;font-size:.78rem}
+
+/* FORM */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-grid-3{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:600px){.form-grid,.form-grid-3{grid-template-columns:1fr}}
+.fg-dark{margin-bottom:16px}
+.fg-dark label{display:block;font-size:.74rem;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px}
+.fg-dark input,.fg-dark select,.fg-dark textarea{
+  width:100%;padding:11px 14px;
+  background:rgba(255,255,255,.04);border:1px solid var(--border);
+  border-radius:8px;color:var(--white);font-size:.9rem;font-family:inherit;outline:none;
+  transition:var(--tr);
+}
+.fg-dark input:focus,.fg-dark select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,58,237,.18)}
+.fg-dark select option{background:#1c1c3a}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:20px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 40px 100px rgba(0,0,0,.8)}
+.modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg2);z-index:1}
+.modal-title{font-size:1.1rem;font-weight:800}
+.modal-close{background:none;border:none;color:var(--gray);font-size:1.3rem;cursor:pointer;padding:4px;line-height:1;border-radius:4px}
+.modal-close:hover{color:var(--red)}
+.modal-body{padding:24px}
+.modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end}
+
+/* ALERTS */
+.alert{padding:11px 16px;border-radius:8px;font-size:.84rem;margin-bottom:14px;display:none}
+.alert-success{background:rgba(16,185,129,.12);color:#6ee7b7;border:1px solid rgba(16,185,129,.2)}
+.alert-error{background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.2)}
+
+/* EMPTY */
+.empty{text-align:center;padding:48px 20px;color:var(--gray)}
+.empty-icon{font-size:3rem;margin-bottom:12px;display:block;opacity:.5}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  .topbar{padding:0 16px;height:56px}
+  .main{padding:16px}
+  .nav-tabs{padding:0 16px;overflow-x:auto;scrollbar-width:none}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .empresa-card{flex-direction:column;align-items:flex-start}
+}
+@media(max-width:480px){
+  .stats-grid{grid-template-columns:1fr}
+  .login-card{padding:36px 24px}
+}
+
+/* LOADING */
+.loading{display:inline-block;width:18px;height:18px;border:2px solid rgba(255,255,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* TOAST */
+#toast{position:fixed;bottom:24px;right:24px;z-index:9999;display:none;min-width:240px;max-width:360px}
+.toast-inner{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px 18px;font-size:.86rem;box-shadow:var(--sh);display:flex;align-items:center;gap:10px}
+.toast-success{border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.1)}
+.toast-error{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.1)}
+
+/* PLAN PILL */
+.plan-pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.68rem;font-weight:700;text-transform:uppercase}
+.plan-basico{background:rgba(156,163,175,.15);color:#d1d5db}
+.plan-pro{background:rgba(59,130,246,.15);color:#93c5fd}
+.plan-enterprise{background:linear-gradient(135deg,rgba(124,58,237,.25),rgba(79,70,229,.25));color:#c4b5fd}
+
+/* PROGRESS */
+.progress-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;margin-top:6px}
+.progress-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--blue));transition:width .5s ease}
+
+/* TABLE */
+.data-table{width:100%;border-collapse:separate;border-spacing:0}
+.data-table th{background:rgba(255,255,255,.03);padding:10px 16px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--gray);border-bottom:1px solid var(--border)}
+.data-table td{padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.04);font-size:.84rem;vertical-align:middle}
+.data-table tr:last-child td{border-bottom:none}
+.data-table tr:hover td{background:rgba(255,255,255,.02)}
+</style>
+</head>
+<body>
+
+<!-- ===== LOGIN ===== -->
+<div id="login-screen">
+  <div class="login-card">
+    <span class="login-crown">👑</span>
+    <h1 class="login-title">Super Admin</h1>
+    <p class="login-sub">Panel de control del sistema SaaS</p>
+    <div class="login-err" id="login-err"></div>
+    <div class="fg">
+      <label>Email</label>
+      <input type="email" id="sa-email" placeholder="super@tudominio.com" autocomplete="email">
+    </div>
+    <div class="fg">
+      <label>Contraseña</label>
+      <input type="password" id="sa-pw" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn-login" onclick="doSuperLogin()" id="login-btn">🔐 Ingresar</button>
+  </div>
+</div>
+
+<!-- ===== APP ===== -->
+<div id="app" style="display:none;flex-direction:column">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-brand">
+      <span class="crown">👑</span>
+      <div>
+        <h1>Super Admin</h1>
+        <p>Panel de control SaaS</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="user-pill">
+        <div class="dot"></div>
+        <span id="sa-user-label">super_admin</span>
+      </div>
+      <button class="btn-logout" onclick="doSuperLogout()">← Salir</button>
+    </div>
+  </div>
+
+  <!-- Nav Tabs -->
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="switchTab('dashboard')" id="tab-dashboard">📊 Dashboard</button>
+    <button class="nav-tab" onclick="switchTab('empresas')"  id="tab-empresas">🏢 Empresas</button>
+    <button class="nav-tab" onclick="switchTab('usuarios')"  id="tab-usuarios">👥 Usuarios</button>
+    <button class="nav-tab" onclick="switchTab('auditoria')" id="tab-auditoria">🔍 Auditoría</button>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- ---- DASHBOARD ---- -->
+    <div id="page-dashboard">
+      <div class="section-hdr" style="margin-bottom:24px">
+        <div>
+          <div class="section-title">Dashboard General</div>
+          <div class="section-sub" id="dashboard-subtitle">Cargando...</div>
+        </div>
+        <button class="btn btn-secondary" onclick="loadDashboard()">🔄 Actualizar</button>
+      </div>
+
+      <div class="stats-grid" id="stats-grid">
+        <!-- Se llena dinámicamente -->
+      </div>
+
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:16px">🏢 Empresas recientes</div>
+        <div id="empresas-recientes-list">
+          <div class="empty"><span class="loading"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- EMPRESAS ---- -->
+    <div id="page-empresas" style="display:none">
+      <div class="section-hdr">
+        <div>
+          <div class="section-title">Gestión de Empresas</div>
+          <div class="section-sub">Crea, activa o suspende empresas del sistema</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <select id="filtro-estado" onchange="loadEmpresas()" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#fff;padding:8px 12px;font-size:.83rem">
+            <option value="">Todas</option>
+            <option value="activa">Activas</option>
+            <option value="suspendida">Suspendidas</option>
+          </select>
+          <button class="btn btn-primary" onclick="openModalNuevaEmpresa()">➕ Nueva empresa</button>
+        </div>
+      </div>
+
+      <div id="empresas-list">
+        <div class="empty"><span class="loading"></span></div>
+      </div>
+    </div>
+
+    <!-- ---- USUARIOS ---- -->
+    <div id="page-usuarios" style="display:none">
+      <div class="section-hdr">
+        <div>
+          <div class="section-title">Usuarios del Sistema</div>
+          <div class="section-sub">Gestiona los usuarios y sus roles</div>
+        </div>
+        <button class="btn btn-secondary" onclick="loadUsuarios()">🔄 Actualizar</button>
+      </div>
+      <div class="card" style="overflow:auto">
+        <table class="data-table" id="tabla-usuarios">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Empresa</th>
+              <th>Rol</th>
+              <th>Estado</th>
+              <th>Registrado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="usuarios-tbody">
+            <tr><td colspan="6" style="text-align:center;padding:30px"><span class="loading"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---- AUDITORÍA ---- -->
+    <div id="page-auditoria" style="display:none">
+      <div class="section-hdr">
+        <div>
+          <div class="section-title">Bitácora de Auditoría</div>
+          <div class="section-sub">Actividad global del sistema</div>
+        </div>
+        <button class="btn btn-secondary" onclick="loadAuditoria()">🔄 Actualizar</button>
+      </div>
+      <div class="card" style="overflow:auto">
+        <table class="data-table" id="tabla-auditoria">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Empresa</th>
+              <th>Usuario</th>
+              <th>Acción</th>
+              <th>Detalles</th>
+            </tr>
+          </thead>
+          <tbody id="audit-tbody">
+            <tr><td colspan="5" style="text-align:center;padding:30px"><span class="loading"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ===== MODAL: NUEVA EMPRESA ===== -->
+<div class="modal-overlay" id="modal-empresa">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">🏢 Nueva Empresa</div>
+      <button class="modal-close" onclick="closeModal('modal-empresa')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-alert" class="alert"></div>
+      <div class="form-grid">
+        <div class="fg-dark" style="grid-column:1/-1">
+          <label>Nombre de la empresa *</label>
+          <input type="text" id="e-nombre" placeholder="Ej: Restaurante El Buen Sabor">
+        </div>
+        <div class="fg-dark">
+          <label>Plan</label>
+          <select id="e-plan">
+            <option value="basico">Básico</option>
+            <option value="pro">Pro</option>
+            <option value="enterprise">Enterprise</option>
+          </select>
+        </div>
+        <div class="fg-dark">
+          <label>Moneda</label>
+          <select id="e-moneda">
+            <option value="Q">Q — Quetzal (Guatemala)</option>
+            <option value="$">$ — Dólar</option>
+            <option value="MX$">MX$ — Peso Mexicano</option>
+            <option value="C$">C$ — Córdoba (Nicaragua)</option>
+            <option value="L">L — Lempira (Honduras)</option>
+            <option value="₡">₡ — Colón (Costa Rica)</option>
+            <option value="B/.">B/. — Balboa (Panamá)</option>
+          </select>
+        </div>
+        <div class="fg-dark">
+          <label>Vencimiento (dejar en blanco = sin límite)</label>
+          <input type="date" id="e-vencimiento">
+        </div>
+        <div class="fg-dark">
+          <label>Email de contacto</label>
+          <input type="email" id="e-email" placeholder="admin@empresa.com">
+        </div>
+        <div class="fg-dark" style="grid-column:1/-1">
+          <label>Teléfono</label>
+          <input type="tel" id="e-telefono" placeholder="+502 1234-5678">
+        </div>
+        <div class="fg-dark" style="grid-column:1/-1">
+          <label>Dirección</label>
+          <input type="text" id="e-direccion" placeholder="Ciudad, País">
+        </div>
+      </div>
+      <div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:8px;padding:12px 16px;font-size:.8rem;color:#c4b5fd;margin-top:8px">
+        💡 Se crearán automáticamente: <strong>20 mesas</strong>, <strong>3 VIP</strong>, <strong>15 barra</strong>, <strong>1 gerencial</strong> y las <strong>6 categorías</strong> del menú por defecto.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-empresa')">Cancelar</button>
+      <button class="btn btn-primary" onclick="crearEmpresa()" id="btn-crear-empresa">✅ Crear empresa</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: EDITAR EMPRESA ===== -->
+<div class="modal-overlay" id="modal-editar">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">✏️ Editar Empresa</div>
+      <button class="modal-close" onclick="closeModal('modal-editar')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-editar-alert" class="alert"></div>
+      <input type="hidden" id="ee-id">
+      <div class="form-grid">
+        <div class="fg-dark" style="grid-column:1/-1">
+          <label>Nombre *</label>
+          <input type="text" id="ee-nombre">
+        </div>
+        <div class="fg-dark">
+          <label>Estado</label>
+          <select id="ee-estado">
+            <option value="activa">✅ Activa</option>
+            <option value="suspendida">🚫 Suspendida</option>
+          </select>
+        </div>
+        <div class="fg-dark">
+          <label>Vencimiento</label>
+          <input type="date" id="ee-vencimiento">
+        </div>
+        <div class="fg-dark">
+          <label>Plan</label>
+          <select id="ee-plan">
+            <option value="basico">Básico</option>
+            <option value="pro">Pro</option>
+            <option value="enterprise">Enterprise</option>
+          </select>
+        </div>
+        <div class="fg-dark">
+          <label>Moneda</label>
+          <select id="ee-moneda">
+            <option value="Q">Q — Quetzal</option>
+            <option value="$">$ — Dólar</option>
+            <option value="MX$">MX$ — Peso Mexicano</option>
+            <option value="C$">C$ — Córdoba</option>
+            <option value="L">L — Lempira</option>
+            <option value="₡">₡ — Colón</option>
+            <option value="B/.">B/. — Balboa</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg-dark" style="margin-top:8px">
+        <label>Logo URL (o sube el logo a Storage → logos-empresas)</label>
+        <input type="url" id="ee-logo" placeholder="https://...">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-editar')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarEmpresa()" id="btn-guardar-empresa">💾 Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"><div class="toast-inner" id="toast-inner"></div></div>
+
+<script>
+'use strict';
+/* ============================================================
+   CONFIGURACIÓN SUPABASE
+   ⚠️  REEMPLAZA con tus valores reales de Supabase
+   Settings → API → Project URL y anon key
+   ============================================================ */
+const SUPABASE_URL  = 'PEGA_TU_SUPABASE_URL_AQUI';
+const SUPABASE_ANON = 'PEGA_TU_SUPABASE_ANON_KEY_AQUI';
+
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+/* ============================================================
+   ESTADO GLOBAL
+   ============================================================ */
+let currentTab = 'dashboard';
+let empresasCache = [];
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+function$(id){ return document.getElementById(id); }
+function fmtDate(iso){
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('es-GT', { day:'2-digit', month:'short', year:'numeric' });
+}
+function fmtDateTime(iso){
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-GT') + ' ' + d.toLocaleTimeString('es-GT',{hour:'2-digit',minute:'2-digit'});
+}
+function estadoReal(e){
+  if (e.estado === 'suspendida') return { label:'Suspendida', cls:'badge-red' };
+  if (e.fecha_vencimiento && new Date(e.fecha_vencimiento) < new Date()) return { label:'Vencida', cls:'badge-amber' };
+  return { label:'Activa', cls:'badge-green' };
+}
+function planPill(plan){
+  const cls = plan === 'enterprise' ? 'plan-enterprise' : plan === 'pro' ? 'plan-pro' : 'plan-basico';
+  return `<span class="plan-pill ${cls}">${plan}</span>`;
+}
+function showToast(msg, type='success'){
+  const t = $('toast'), ti = $('toast-inner');
+  ti.className = `toast-inner toast-${type}`;
+  ti.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 3500);
+}
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+/* ============================================================
+   AUTH
+   ============================================================ */
+async function doSuperLogin(){
+  const email = $('sa-email').value.trim();
+  const pw    = $('sa-pw').value;
+  const btn   = $('login-btn');
+  const err   = $('login-err');
+  err.style.display = 'none';
+
+  if (!email || !pw){ err.textContent='Completa todos los campos'; err.style.display='block'; return; }
+
+  btn.innerHTML = '<span class="loading"></span> Ingresando…';
+  btn.disabled = true;
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+  if (error){
+    err.textContent = '❌ ' + (error.message === 'Invalid login credentials' ? 'Credenciales incorrectas' : error.message);
+    err.style.display = 'block';
+    btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
+    return;
+  }
+
+  // Verificar que sea super_admin
+  const { data: profile } = await sb.from('profiles').select('role').eq('id', data.user.id).single();
+  if (!profile || profile.role !== 'super_admin'){
+    await sb.auth.signOut();
+    err.textContent = '⛔ No tienes permisos de Super Administrador';
+    err.style.display = 'block';
+    btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
+    return;
+  }
+
+  $('sa-user-label').textContent = data.user.email;
+  $('login-screen').style.display = 'none';
+  $('app').style.display = 'flex';
+  loadDashboard();
+}
+
+async function doSuperLogout(){
+  await sb.auth.signOut();
+  $('app').style.display = 'none';
+  $('login-screen').style.display = 'flex';
+  $('sa-pw').value = '';
+}
+
+// Verificar sesión al cargar
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_OUT' || !session){
+    $('app').style.display = 'none';
+    $('login-screen').style.display = 'flex';
+  }
+});
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+const TABS = ['dashboard','empresas','usuarios','auditoria'];
+function switchTab(tab){
+  currentTab = tab;
+  TABS.forEach(t => {
+    $('tab-'+t)?.classList.remove('active');
+    $('page-'+t) && ($('page-'+t).style.display = 'none');
+  });
+  $('tab-'+tab)?.classList.add('active');
+  $('page-'+tab) && ($('page-'+tab).style.display = 'block');
+  const loaders = { dashboard: loadDashboard, empresas: loadEmpresas, usuarios: loadUsuarios, auditoria: loadAuditoria };
+  if (loaders[tab]) loaders[tab]();
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+async function loadDashboard(){
+  $('dashboard-subtitle').textContent = 'Actualizado ' + fmtDateTime(new Date().toISOString());
+
+  // Stats
+  const [{ count: totalEmpresas }, { count: activas }, { count: suspendidas }, { data: ventas_hoy }] = await Promise.all([
+    sb.from('empresas').select('*', { count:'exact', head:true }),
+    sb.from('empresas').select('*', { count:'exact', head:true }).eq('estado','activa'),
+    sb.from('empresas').select('*', { count:'exact', head:true }).eq('estado','suspendida'),
+    sb.from('ventas').select('total').gte('created_at', new Date().toISOString().split('T')[0])
+  ]);
+
+  const montoHoy = (ventas_hoy||[]).reduce((s,v) => s + parseFloat(v.total||0), 0);
+  const vencidas = await contarVencidas();
+
+  $('stats-grid').innerHTML = `
+    <div class="stat-card" style="--accent-clr:rgba(124,58,237,.1)">
+      <div class="stat-icon">🏢</div>
+      <div class="stat-label">Total empresas</div>
+      <div class="stat-value">${totalEmpresas||0}</div>
+    </div>
+    <div class="stat-card" style="--accent-clr:rgba(16,185,129,.08)">
+      <div class="stat-icon">✅</div>
+      <div class="stat-label">Activas</div>
+      <div class="stat-value" style="color:#6ee7b7">${activas||0}</div>
+    </div>
+    <div class="stat-card" style="--accent-clr:rgba(239,68,68,.08)">
+      <div class="stat-icon">🚫</div>
+      <div class="stat-label">Suspendidas</div>
+      <div class="stat-value" style="color:#fca5a5">${suspendidas||0}</div>
+    </div>
+    <div class="stat-card" style="--accent-clr:rgba(245,158,11,.08)">
+      <div class="stat-icon">⏰</div>
+      <div class="stat-label">Vencidas</div>
+      <div class="stat-value" style="color:#fcd34d">${vencidas}</div>
+    </div>
+    <div class="stat-card" style="--accent-clr:rgba(59,130,246,.08)">
+      <div class="stat-icon">💰</div>
+      <div class="stat-label">Ventas hoy (global)</div>
+      <div class="stat-value" style="font-size:1.5rem">Q ${montoHoy.toFixed(2)}</div>
+      <div class="stat-sub">${(ventas_hoy||[]).length} transacciones</div>
+    </div>
+  `;
+
+  // Empresas recientes
+  const { data: recientes } = await sb.from('empresas').select('*').order('created_at',{ascending:false}).limit(5);
+  if (!recientes || recientes.length === 0){
+    $('empresas-recientes-list').innerHTML = `<div class="empty"><span class="empty-icon">🏢</span><p>Aún no hay empresas registradas</p></div>`;
+    return;
+  }
+  $('empresas-recientes-list').innerHTML = recientes.map(e => {
+    const er = estadoReal(e);
+    return `<div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+      <div style="font-size:1.3rem">${e.logo_url? `<img src="${e.logo_url}" style="width:36px;height:36px;border-radius:8px;object-fit:cover">` : '🏢'}</div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:.88rem">${e.nombre}</div>
+        <div style="font-size:.73rem;color:var(--gray)">Creada ${fmtDate(e.created_at)} · ${planPill(e.plan||'basico')}</div>
+      </div>
+      <span class="badge ${er.cls}">${er.label}</span>
+    </div>`;
+  }).join('');
+}
+
+async function contarVencidas(){
+  const { count } = await sb.from('empresas')
+    .select('*',{count:'exact',head:true})
+    .eq('estado','activa')
+    .lt('fecha_vencimiento', new Date().toISOString().split('T')[0])
+    .not('fecha_vencimiento','is',null);
+  return count || 0;
+}
+
+/* ============================================================
+   EMPRESAS
+   ============================================================ */
+async function loadEmpresas(){
+  $('empresas-list').innerHTML = `<div class="empty"><span class="loading"></span></div>`;
+  let query = sb.from('empresas').select('*').order('created_at',{ascending:false});
+  const filtro = $('filtro-estado').value;
+  if (filtro) query = query.eq('estado', filtro);
+
+  const { data, error } = await query;
+  if (error){ $('empresas-list').innerHTML = `<div class="empty">Error: ${error.message}</div>`; return; }
+  empresasCache = data || [];
+
+  if (!data || data.length === 0){
+    $('empresas-list').innerHTML = `<div class="empty"><span class="empty-icon">🏢</span><p>No hay empresas</p><button class="btn btn-primary" onclick="openModalNuevaEmpresa()" style="margin-top:14px">➕ Crear primera empresa</button></div>`;
+    return;
+  }
+
+  $('empresas-list').innerHTML = data.map(e => {
+    const er = estadoReal(e);
+    const venc = e.fecha_vencimiento ? fmtDate(e.fecha_vencimiento) : 'Sin límite';
+    return `<div class="empresa-card" id="ecard-${e.id}">
+      <div class="empresa-logo">${e.logo_url? `<img src="${e.logo_url}" alt="${e.nombre}">` : '🏢'}</div>
+      <div class="empresa-info">
+        <div class="empresa-name">${e.nombre}</div>
+        <div class="empresa-meta">${planPill(e.plan||'basico')} · Moneda: ${e.moneda||'Q'} · Vence: ${venc}</div>
+        <div style="margin-top:5px"><span class="badge ${er.cls}">${er.label}</span></div>
+      </div>
+      <div class="empresa-actions">
+        <button class="btn btn-sm btn-secondary"  onclick="editarEmpresa('${e.id}')">✏️ Editar</button>
+        ${e.estado==='activa'
+          ? `<button class="btn btn-sm btn-danger"   onclick="cambiarEstado('${e.id}','suspendida')">🚫 Suspender</button>`
+          : `<button class="btn btn-sm btn-success"  onclick="cambiarEstado('${e.id}','activa')">✅ Activar</button>`}
+        <button class="btn btn-sm btn-secondary" onclick="renovar30('${e.id}')">+30 días</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openModalNuevaEmpresa(){
+  $('e-nombre').value = '';
+  $('e-plan').value = 'basico';
+  $('e-moneda').value = 'Q';
+  $('e-vencimiento').value = '';
+  $('e-email').value = '';
+  $('e-telefono').value = '';
+  $('e-direccion').value = '';
+  $('modal-alert').style.display = 'none';
+  openModal('modal-empresa');
+  setTimeout(() => $('e-nombre').focus(), 100);
+}
+
+async function crearEmpresa(){
+  const nombre = $('e-nombre').value.trim();
+  if (!nombre){ showModalAlert('modal-alert','Ingresa el nombre de la empresa','error'); return; }
+
+  const btn = $('btn-crear-empresa');
+  btn.innerHTML = '<span class="loading"></span> Creando…';
+  btn.disabled = true;
+
+  const { data, error } = await sb.rpc('crear_empresa', {
+    p_nombre:            nombre,
+    p_moneda:            $('e-moneda').value,
+    p_fecha_vencimiento: $('e-vencimiento').value || null,
+    p_plan:              $('e-plan').value
+  });
+
+  if (error){
+    showModalAlert('modal-alert', 'Error: ' + error.message, 'error');
+    btn.innerHTML = '✅ Crear empresa'; btn.disabled = false;
+    return;
+  }
+
+  // Actualizar email/teléfono/dirección si se indicaron
+  const updates = {};
+  if ($('e-email').value)     updates.email_contacto = $('e-email').value;
+  if ($('e-telefono').value)  updates.telefono       = $('e-telefono').value;
+  if ($('e-direccion').value) updates.direccion      = $('e-direccion').value;
+  if (Object.keys(updates).length > 0){
+    await sb.from('empresas').update(updates).eq('id', data);
+  }
+
+  showToast('✅ Empresa creada exitosamente');
+  closeModal('modal-empresa');
+  btn.innerHTML = '✅ Crear empresa'; btn.disabled = false;
+  if (currentTab === 'empresas') loadEmpresas();
+  loadDashboard();
+}
+
+function editarEmpresa(id){
+  const e = empresasCache.find(x => x.id === id);
+  if (!e) return;
+  $('ee-id').value           = e.id;
+  $('ee-nombre').value       = e.nombre;
+  $('ee-estado').value       = e.estado;
+  $('ee-plan').value         = e.plan || 'basico';
+  $('ee-moneda').value       = e.moneda || 'Q';
+  $('ee-vencimiento').value  = e.fecha_vencimiento || '';
+  $('ee-logo').value         = e.logo_url || '';
+  $('modal-editar-alert').style.display = 'none';
+  openModal('modal-editar');
+}
+
+async function guardarEmpresa(){
+  const id = $('ee-id').value;
+  const nombre = $('ee-nombre').value.trim();
+  if (!nombre){ showModalAlert('modal-editar-alert','Ingresa el nombre','error'); return; }
+
+  const btn = $('btn-guardar-empresa');
+  btn.innerHTML = '<span class="loading"></span> Guardando…'; btn.disabled = true;
+
+  const updates = {
+    nombre,
+    estado:            $('ee-estado').value,
+    plan:              $('ee-plan').value,
+    moneda:            $('ee-moneda').value,
+    fecha_vencimiento: $('ee-vencimiento').value || null,
+    logo_url:          $('ee-logo').value || null
+  };
+
+  const { error } = await sb.from('empresas').update(updates).eq('id', id);
+  if (error){
+    showModalAlert('modal-editar-alert','Error: ' + error.message, 'error');
+    btn.innerHTML = '💾 Guardar cambios'; btn.disabled = false;
+    return;
+  }
+
+  showToast('💾 Empresa actualizada');
+  closeModal('modal-editar');
+  btn.innerHTML = '💾 Guardar cambios'; btn.disabled = false;
+  loadEmpresas();
+}
+
+async function cambiarEstado(id, nuevoEstado){
+  const { error } = await sb.from('empresas').update({ estado: nuevoEstado }).eq('id', id);
+  if (error){ showToast('Error: ' + error.message, 'error'); return; }
+  showToast(nuevoEstado === 'activa' ? '✅ Empresa activada' : '🚫 Empresa suspendida');
+  loadEmpresas();
+}
+
+async function renovar30(id){
+  const e = empresasCache.find(x => x.id === id);
+  if (!e) return;
+  const base = (e.fecha_vencimiento && new Date(e.fecha_vencimiento) > new Date())
+    ? new Date(e.fecha_vencimiento) : new Date();
+  base.setDate(base.getDate() + 30);
+  const nueva = base.toISOString().split('T')[0];
+
+  const { error } = await sb.from('empresas').update({ fecha_vencimiento: nueva, estado: 'activa' }).eq('id', id);
+  if (error){ showToast('Error: ' + error.message, 'error'); return; }
+  showToast('📅 Renovada 30 días → ' + nueva);
+  loadEmpresas();
+}
+
+/* ============================================================
+   USUARIOS
+   ============================================================ */
+async function loadUsuarios(){
+  $('usuarios-tbody').innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px"><span class="loading"></span></td></tr>`;
+
+  const { data: perfiles, error } = await sb.from('profiles')
+    .select('id, role, nombre_visible, activo, empresa_id, created_at, empresas(nombre)');
+
+  const { data: authUsers } = await sb.auth.admin?.listUsers() || { data: null };
+
+  if (error){ $('usuarios-tbody').innerHTML = `<tr><td colspan="6">Error: ${error.message}</td></tr>`; return; }
+
+  const rows = (perfiles||[]).map(p => {
+    const rolBadge = p.role === 'super_admin' ? 'badge-purple' : p.role === 'empresa_admin' ? 'badge-blue' : 'badge-green';
+    const empresa  = p.empresas?.nombre || '—';
+    return `<tr>
+      <td>${p.nombre_visible || p.id}</td>
+      <td>${empresa}</td>
+      <td><span class="badge ${rolBadge}">${p.role}</span></td>
+      <td><span class="badge ${p.activo ? 'badge-green' : 'badge-red'}">${p.activo ? 'Activo' : 'Inactivo'}</span></td>
+      <td>${fmtDate(p.created_at)}</td>
+      <td>
+        <button class="btn btn-sm btn-secondary" onclick="cambiarRol('${p.id}','${p.role}')">Rol</button>
+      </td>
+    </tr>`;
+  });
+
+  $('usuarios-tbody').innerHTML = rows.length > 0 ? rows.join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--gray)">No hay usuarios</td></tr>`;
+}
+
+async function cambiarRol(uid, rolActual){
+  const roles = ['staff','empresa_admin','super_admin'];
+  const nuevo = prompt(`Rol actual: ${rolActual}\nNuevo rol (staff / empresa_admin / super_admin):`);
+  if (!nuevo || !roles.includes(nuevo)) return;
+  const { error } = await sb.from('profiles').update({ role: nuevo }).eq('id', uid);
+  if (error){ showToast('Error: ' + error.message, 'error'); return; }
+  showToast('✅ Rol actualizado a ' + nuevo);
+  loadUsuarios();
+}
+
+/* ============================================================
+   AUDITORÍA
+   ============================================================ */
+async function loadAuditoria(){
+  $('audit-tbody').innerHTML = `<tr><td colspan="5" style="text-align:center;padding:30px"><span class="loading"></span></td></tr>`;
+
+  const { data, error } = await sb.from('auditoria')
+    .select('*, empresas(nombre), profiles(nombre_visible)')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error){ $('audit-tbody').innerHTML = `<tr><td colspan="5">Error: ${error.message}</td></tr>`; return; }
+
+  const rows = (data||[]).map(a => `<tr>
+    <td style="font-size:.78rem;white-space:nowrap">${fmtDateTime(a.created_at)}</td>
+    <td>${a.empresas?.nombre || '—'}</td>
+    <td>${a.profiles?.nombre_visible || a.user_id || '—'}</td>
+    <td><code style="font-size:.75rem;background:rgba(255,255,255,.06);padding:2px 6px;border-radius:4px">${a.accion}</code></td>
+    <td style="font-size:.76rem;color:var(--gray);max-width:200px;overflow:hidden;text-overflow:ellipsis">${a.detalles ? JSON.stringify(a.detalles) : '—'}</td>
+  </tr>`);
+
+  $('audit-tbody').innerHTML = rows.length > 0 ? rows.join('') : `<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--gray)">No hay registros</td></tr>`;
+}
+
+/* ============================================================
+   HELPERS MODALES
+   ============================================================ */
+function showModalAlert(id, msg, type='error'){
+  const el = $(id);
+  el.textContent = msg;
+  el.className = `alert alert-${type}`;
+  el.style.display = 'block';
+}
+
+/* ============================================================
+   INIT — verificar sesión existente
+   ============================================================ */
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    const { data: p } = await sb.from('profiles').select('role').eq('id', session.user.id).single();
+    if (p && p.role === 'super_admin'){
+      $('sa-user-label').textContent = session.user.email;
+      $('login-screen').style.display = 'none';
+      $('app').style.display = 'flex';
+      loadDashboard();
+    }
+  }
+})();
+</script>
+</body>
+</html>

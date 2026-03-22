@@ -1,0 +1,45 @@
+{
+  "name": "Restaurante POS — Sistema de Mesas y Órdenes",
+  "short_name": "RestaurantePOS",
+  "description": "Sistema POS para restaurantes: mesas, órdenes, cocina y contabilidad",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2c1810",
+  "theme_color": "#b85c1a",
+  "lang": "es",
+  "dir": "ltr",
+  "categories": ["business", "food"],
+  "icons": [
+    {
+      "src": "./logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Ver Mesas",
+      "short_name": "Mesas",
+      "description": "Ir al tablero de mesas",
+      "url": "/?page=mesas",
+      "icons": [{ "src": "./logo.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Ver Órdenes",
+      "short_name": "Órdenes",
+      "description": "Ver órdenes activas",
+      "url": "/?page=ordenes",
+      "icons": [{ "src": "./logo.png", "sizes": "192x192" }]
+    }
+  ]
+}
