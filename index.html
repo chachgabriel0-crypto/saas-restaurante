@@ -326,9 +326,6 @@ textarea{resize:vertical;min-height:78px}
 /* Changelog modal */
 .changelog-entry{border-left:3px solid var(--mint);padding:8px 12px;margin-bottom:10px;background:var(--mint-light);border-radius:0 6px 6px 0}
 .changelog-entry h4{font-size:.9rem;font-weight:700;color:var(--navy)}.changelog-entry p{font-size:.8rem;color:var(--g600);margin-top:3px}
-#login-mode-row{display:none;justify-content:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-#login-mode-row button{font-size:.78rem;padding:6px 12px;border-radius:20px;border:2px solid var(--g200);background:var(--white);cursor:pointer;color:var(--g600)}
-#login-mode-row button.mode-on{border-color:var(--mint);background:var(--mint-light);color:var(--mint-dark);font-weight:700}
 /* Dark toggle button */
 .dark-toggle{background:none;border:1px solid rgba(255,255,255,.3);color:#fff;padding:5px 10px;border-radius:20px;cursor:pointer;font-size:.78rem;transition:var(--tr)}
 .dark-toggle:hover{background:rgba(255,255,255,.15)}
@@ -347,17 +344,16 @@ textarea{resize:vertical;min-height:78px}
       <img src="./logo.png" alt="Restaurante">
       <h1 class="login-title">Restaurante</h1>
       <p class="login-tagline">Carta, mesas y cobro — todo en un solo lugar</p>
-      <p style="color:var(--g400);font-size:.8rem;margin-top:10px">Sistema POS · v3.3</p>
+      <p style="color:var(--g400);font-size:.8rem;margin-top:10px">POS SaaS · v3.3 · Supabase</p>
     </div>
     <div id="lock-warning"></div>
-    <div class="login-error" id="login-error"></div>
-    <div id="login-mode-row" aria-label="Modo de acceso">
-      <button type="button" id="btn-mode-cloud" class="mode-on">☁️ Cuenta en la nube</button>
-      <button type="button" id="btn-mode-local">💻 Solo este dispositivo</button>
+    <div id="login-config-missing" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:var(--r-sm);padding:11px 14px;margin-bottom:14px;font-size:.84rem;color:#856404;line-height:1.4">
+      <strong>SaaS no configurado.</strong> Crea <code style="background:rgba(0,0,0,.06);padding:2px 6px;border-radius:4px">config.js</code> con la URL y la clave <em>anon</em> de Supabase (copia <code>config.example.js</code>).
     </div>
+    <div class="login-error" id="login-error"></div>
     <div class="form-group">
-      <label id="login-user-label">Usuario</label>
-      <input type="text" id="login-user" placeholder="Tu usuario" autocomplete="username">
+      <label id="login-user-label">Correo electrónico</label>
+      <input type="email" id="login-user" placeholder="tu@restaurante.com" autocomplete="email">
     </div>
     <div class="form-group">
       <label>Contraseña</label>
@@ -707,7 +703,6 @@ let _saveQueued = false;
 let sb = null;
 let empresaId = null;
 let posCloudChannel = null;
-let useCloudLogin = true;
 
 function initCloudClient() {
   const cfg = window.RESTAURANTE_CONFIG || {};
@@ -725,37 +720,21 @@ function initCloudClient() {
   }
 }
 
-function initLoginModeUI() {
-  const row = document.getElementById('login-mode-row');
+function applySaaSLoginUI() {
   const lbl = document.getElementById('login-user-label');
   const inp = document.getElementById('login-user');
   const foot = document.getElementById('login-footer-hint');
-  const bCloud = document.getElementById('btn-mode-cloud');
-  const bLocal = document.getElementById('btn-mode-local');
-  if (!row || !lbl || !inp) return;
-  if (!sb) {
-    row.style.display = 'none';
-    return;
+  const miss = document.getElementById('login-config-missing');
+  if (lbl) lbl.textContent = 'Correo electrónico';
+  if (inp) {
+    inp.type = 'email';
+    inp.placeholder = 'tu@restaurante.com';
+    inp.autocomplete = 'email';
   }
-  row.style.display = 'flex';
-  const setMode = (cloud) => {
-    useCloudLogin = cloud;
-    try { localStorage.setItem('pos_login_mode', cloud ? 'cloud' : 'local'); } catch (_) {}
-    lbl.textContent = cloud ? 'Correo electrónico' : 'Usuario';
-    inp.placeholder = cloud ? 'tu@correo.com' : 'Tu usuario';
-    inp.type = cloud ? 'email' : 'text';
-    inp.autocomplete = cloud ? 'email' : 'username';
-    if (bCloud) bCloud.classList.toggle('mode-on', cloud);
-    if (bLocal) bLocal.classList.toggle('mode-on', !cloud);
-    if (foot) foot.textContent = cloud
-      ? '☁️ Datos sincronizados en Supabase · Misma cuenta en todos los equipos'
-      : '🔒 Modo local: datos solo en este navegador';
-  };
-  if (bCloud) bCloud.onclick = () => setMode(true);
-  if (bLocal) bLocal.onclick = () => setMode(false);
-  let mode = 'cloud';
-  try { mode = localStorage.getItem('pos_login_mode') || 'cloud'; } catch (_) {}
-  setMode(mode !== 'local');
+  if (foot) {
+    foot.textContent = '☁️ SaaS profesional · Supabase · Licencia por empresa · Misma cuenta en todos los equipos';
+  }
+  if (miss) miss.style.display = sb ? 'none' : 'block';
 }
 
 async function loadCloudSnapshotIntoDB() {
@@ -821,15 +800,19 @@ async function tryRestoreCloudSession() {
       .select('id, role, nombre_visible, empresa_id, activo')
       .eq('id', session.user.id)
       .maybeSingle();
-    if (pErr || !profile || !profile.empresa_id) {
+    if (pErr || !profile) {
+      await sb.auth.signOut();
+      return false;
+    }
+    if (String(profile.role || '') === 'super_admin') {
+      await sb.auth.signOut();
+      return false;
+    }
+    if (!profile.empresa_id) {
       await sb.auth.signOut();
       return false;
     }
     if (profile.activo === false) {
-      await sb.auth.signOut();
-      return false;
-    }
-    if (profile.role === 'super_admin') {
       await sb.auth.signOut();
       return false;
     }
@@ -853,13 +836,14 @@ async function tryRestoreCloudSession() {
 
 async function doCloudLogin() {
   if (checkLock()) return;
-  const email = (document.getElementById('login-user')?.value || '').trim();
+  const emailRaw = (document.getElementById('login-user')?.value || '').trim();
+  const email = emailRaw.toLowerCase();
   const pw = document.getElementById('login-pw').value;
-  if (!email) { showLoginError('Ingresa tu correo'); return; }
+  if (!emailRaw) { showLoginError('Ingresa tu correo'); return; }
   if (!pw) { showLoginError('Ingresa tu contraseña'); return; }
-  if (!sb) { showLoginError('Falta configuración: config.js con Supabase'); return; }
+  if (!sb) { showLoginError('Configura config.js con URL y clave anon de Supabase (modo SaaS).'); return; }
   try {
-    const { error } = await sb.auth.signInWithPassword({ email, password: pw });
+    const { data: authData, error } = await sb.auth.signInWithPassword({ email, password: pw });
     if (error) {
       failedAttempts++;
       const rem = MAX_FAIL_ATTEMPTS - failedAttempts;
@@ -876,9 +860,13 @@ async function doCloudLogin() {
       showLoginError(error.message === 'Invalid login credentials' ? 'Credenciales incorrectas' : error.message);
       return;
     }
-    const { data: { session } } = await sb.auth.getSession();
-    if (!session) {
-      showLoginError('No se obtuvo sesión');
+    let session = authData && authData.session;
+    if (!session || !session.user) {
+      const { data: gs } = await sb.auth.getSession();
+      session = gs && gs.session;
+    }
+    if (!session || !session.user) {
+      showLoginError('No se obtuvo sesión. ¿Correo sin confirmar? Revisa Authentication en Supabase.');
       return;
     }
     const { data: profile, error: pErr } = await sb.from('profiles')
@@ -890,14 +878,15 @@ async function doCloudLogin() {
       showLoginError('No se encontró tu perfil en la base de datos.');
       return;
     }
-    if (!profile.empresa_id) {
+    const roleStr = String(profile.role || '');
+    if (roleStr === 'super_admin') {
       await sb.auth.signOut();
-      showLoginError('Tu cuenta no está asignada a un restaurante. Pídele a un administrador que vincule tu usuario a una empresa.');
+      showLoginError('Esta cuenta es de super administrador. Abre super-admin.html para licencias y empresas; el POS es solo para personal del restaurante (staff / admin de empresa).');
       return;
     }
-    if (profile.role === 'super_admin') {
+    if (!profile.empresa_id) {
       await sb.auth.signOut();
-      showLoginError('Para super administrador usa super-admin.html, no el POS.');
+      showLoginError('Tu usuario no tiene restaurante asignado. En Supabase → profiles pon empresa_id o pide a un super admin que te vincule a una empresa.');
       return;
     }
     if (profile.activo === false) {
@@ -910,7 +899,7 @@ async function doCloudLogin() {
     empresaId = profile.empresa_id;
     currentUser = {
       id: profile.id,
-      username: profile.nombre_visible || email.split('@')[0],
+      username: profile.nombre_visible || emailRaw.split('@')[0],
       role: profile.role === 'empresa_admin' ? 'admin' : 'seller',
       cloud: true
     };
@@ -1114,72 +1103,11 @@ function checkLock() {
 
 async function doLogin() {
   if (checkLock()) return;
-  if (useCloudLogin && sb) {
-    await doCloudLogin();
+  if (!sb) {
+    showLoginError('Este POS solo funciona en modo SaaS: crea config.js con la URL y la clave anon de tu proyecto Supabase.');
     return;
   }
-  const username = (document.getElementById('login-user')?.value || '').trim();
-  const pw = document.getElementById('login-pw').value;
-  if (!username) { showLoginError('Ingresa tu nombre de usuario'); return; }
-  if (!pw)       { showLoginError('Ingresa tu contraseña'); return; }
-
-  const pwHash = await Security.hashPassword(pw);
-  const user = (DB.users || []).find(u => u.username.toLowerCase() === username.toLowerCase());
-
-  // Check password: support both hashed (new) and plain (legacy)
-  const validHash  = user && user.passwordHash && user.passwordHash === pwHash;
-  const validPlain = user && !user.passwordHash && user.password === pw;
-  const isAdminUser = !!(user && user.username && user.username.toLowerCase() === 'admin');
-  const NEW_ADMIN_PASSWORD = 'resta2020';
-  const LEGACY_ADMIN_PASSWORDS = ['cevichera2020', 'coffee2020'];
-
-  let validLegacyPlainAdmin = false;
-  let validLegacyHashedAdmin = false;
-
-  if (isAdminUser) {
-    validLegacyPlainAdmin = !user.passwordHash && LEGACY_ADMIN_PASSWORDS.includes(user.password) && pw === NEW_ADMIN_PASSWORD;
-    if (user.passwordHash && pw === NEW_ADMIN_PASSWORD) {
-      for (const legacy of LEGACY_ADMIN_PASSWORDS) {
-        const legacyHash = await Security.hashPassword(legacy);
-        if (user.passwordHash === legacyHash) { validLegacyHashedAdmin = true; break; }
-      }
-    }
-  }
-
-  if (!user || (!validHash && !validPlain && !validLegacyPlainAdmin && !validLegacyHashedAdmin)) {
-    failedAttempts++;
-    const remaining = MAX_FAIL_ATTEMPTS - failedAttempts;
-    const attEl = document.getElementById('attempts-indicator');
-    attEl.style.display = 'block';
-    if (remaining <= 0) {
-      lockUntil = Date.now() + LOCK_MINUTES * 60000;
-      failedAttempts = 0;
-      attEl.style.display = 'none';
-      showLoginError(`Sistema bloqueado ${LOCK_MINUTES} min por exceso de intentos.`);
-      AuditLog.append('LOCKOUT', { username });
-      await saveDB();
-    } else {
-      attEl.textContent = `Intento fallido. ${remaining} intento(s) restante(s).`;
-      showLoginError('Usuario o contraseña incorrectos');
-    }
-    return;
-  }
-
-  // Upgrade plain password to hashed on first login
-  if ((validPlain || validLegacyPlainAdmin) && !user.passwordHash) {
-    user.passwordHash = pwHash;
-    user.password = undefined;
-    await saveDB();
-  }
-
-  failedAttempts = 0;
-  document.getElementById('attempts-indicator').style.display = 'none';
-  currentUser = user;
-  sessionStorage.setItem(SESSION_KEY, user.id);
-  AuditLog.append('LOGIN', { username: user.username, role: user.role });
-  await saveDB();
-  startInactivityTimer();
-  showApp();
+  await doCloudLogin();
 }
 
 function showLoginError(msg) {
@@ -1207,17 +1135,7 @@ async function doLogout() {
   document.getElementById('login-pw').value = '';
   const lu = document.getElementById('login-user'); if(lu) lu.value = '';
   initLogin();
-  initLoginModeUI();
-}
-
-function tryRestoreSession() {
-  if (sessionStorage.getItem('pos_cloud') === '1') return false;
-  const sid = sessionStorage.getItem(SESSION_KEY);
-  if (sid) {
-    const u = (DB.users || []).find(x=>x.id===sid);
-    if (u) { currentUser = u; return true; }
-  }
-  return false;
+  applySaaSLoginUI();
 }
 
 /* ============================================================
@@ -1294,7 +1212,7 @@ function showApp() {
   document.getElementById('app').style.display = 'flex';
   document.getElementById('current-user-label').textContent = currentUser.username;
   const sec = document.querySelector('.security-indicator span:last-child');
-  if (sec) sec.textContent = currentUser.cloud ? 'En la nube' : 'Local';
+  if (sec) sec.textContent = 'SaaS';
   applyDarkMode();
   buildNav(); buildSidebar(); navigateTo('mesas');
   markAttendance();
@@ -3282,24 +3200,20 @@ window.addEventListener('load', async () => {
   try {
     await Database.openIDB();
     initCloudClient();
+    applySaaSLoginUI();
     await loadDB();
     if (await tryRestoreCloudSession()) {
-      initLoginModeUI();
-      startInactivityTimer();
-      showApp();
-    } else if (tryRestoreSession()) {
-      initLoginModeUI();
       startInactivityTimer();
       showApp();
     } else {
       initLogin();
-      initLoginModeUI();
     }
   } catch(e) {
     ErrorHandler.log('Init error', e);
     DB = defaultData();
+    initCloudClient();
+    applySaaSLoginUI();
     initLogin();
-    initLoginModeUI();
   }
 });
 

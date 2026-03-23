@@ -77,7 +77,10 @@ a{color:inherit;text-decoration:none}
   transition:var(--tr);box-shadow:0 4px 20px rgba(124,58,237,.4);
 }
 .btn-login:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(124,58,237,.55)}
-.login-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:8px;padding:10px 14px;font-size:.84rem;margin-bottom:14px;display:none}
+.login-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:8px;padding:10px 14px;font-size:.82rem;margin-bottom:14px;display:none;line-height:1.45;max-width:100%}
+.login-err code{font-size:.78rem;background:rgba(0,0,0,.25);padding:1px 5px;border-radius:4px}
+.login-help pre{margin:8px 0 0;font-family:ui-monospace,monospace}
+.login-help strong{color:#c4b5fd}
 
 /* ============================================================
    APP LAYOUT
@@ -259,6 +262,18 @@ a{color:inherit;text-decoration:none}
       <input type="password" id="sa-pw" placeholder="••••••••" autocomplete="current-password">
     </div>
     <button class="btn-login" onclick="doSuperLogin()" id="login-btn">🔐 Ingresar</button>
+    <details class="login-help" style="margin-top:22px;text-align:left">
+      <summary style="cursor:pointer;color:var(--gray);font-size:.82rem">No entra / se frustra — leer esto</summary>
+      <div style="margin-top:10px;font-size:.78rem;color:var(--gray);line-height:1.5">
+        <p><strong>1)</strong> Mismo proyecto: <code>config.js</code> debe ser la URL y la clave <em>anon</em> de <strong>ese</strong> Supabase (Settings → API).</p>
+        <p><strong>2)</strong> Rol en SQL: en SQL Editor ejecuta (cambia el correo):</p>
+        <pre style="background:rgba(0,0,0,.35);padding:10px;border-radius:8px;overflow:auto;font-size:.72rem;white-space:pre-wrap">INSERT INTO public.profiles (id, role)
+SELECT id, 'super_admin'::public.app_role FROM auth.users
+WHERE lower(email)=lower('tu@correo.com')
+ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
+        <p><strong>3)</strong> Correo confirmado: Authentication → tu usuario → si pide confirmación, ábrelo desde el mail o desactiva “Confirm email” en Auth → Providers (solo desarrollo).</p>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -614,12 +629,31 @@ function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 /* ============================================================
    AUTH
    ============================================================ */
+function mapAuthErrorMessage(error) {
+  if (!error || !error.message) return 'Error de acceso';
+  const m = error.message;
+  const low = m.toLowerCase();
+  if (low.includes('invalid login') || low.includes('invalid credentials')) {
+    return 'Correo o contraseña incorrectos. Si cambiaste la clave en Supabase, usa la nueva. Comprueba que el usuario exista en Authentication → Users de ESTE proyecto.';
+  }
+  if (low.includes('email not confirmed')) {
+    return 'Debes confirmar el correo: revisa la bandeja o en Supabase → Authentication → Users confirma el email manualmente.';
+  }
+  if (low.includes('too many request')) {
+    return 'Demasiados intentos. Espera 1–2 minutos y vuelve a intentar.';
+  }
+  return m;
+}
+
 async function doSuperLogin(){
-  const email = $('sa-email').value.trim();
+  const emailRaw = $('sa-email').value.trim();
+  const email = emailRaw.toLowerCase();
   const pw    = $('sa-pw').value;
   const btn   = $('login-btn');
   const err   = $('login-err');
   err.style.display = 'none';
+  err.textContent = '';
+  err.innerHTML = '';
 
   if (!sb) {
     err.textContent = '⚠️ Crea config.js desde config.example.js y rellena URL y anon key.';
@@ -627,31 +661,36 @@ async function doSuperLogin(){
     return;
   }
 
-  if (!email || !pw){ err.textContent='Completa todos los campos'; err.style.display='block'; return; }
+  if (!emailRaw || !pw){ err.textContent='Completa todos los campos'; err.style.display='block'; return; }
 
   btn.innerHTML = '<span class="loading"></span> Ingresando…';
   btn.disabled = true;
 
   try {
-    const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+    const { data: authData, error } = await sb.auth.signInWithPassword({ email, password: pw });
     if (error){
       AppLog.warn('signIn', error.message);
-      err.textContent = '❌ ' + (error.message === 'Invalid login credentials' ? 'Credenciales incorrectas' : error.message);
+      err.textContent = '❌ ' + mapAuthErrorMessage(error);
       err.style.display = 'block';
       btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
       return;
     }
 
-    const { data: sess } = await sb.auth.getSession();
-    if (!sess?.session) {
+    let activeSession = authData && authData.session;
+    if (!activeSession || !activeSession.user) {
+      const { data: gs } = await sb.auth.getSession();
+      activeSession = gs && gs.session;
+    }
+    if (!activeSession || !activeSession.user) {
       await sb.auth.signOut();
-      err.textContent = '❌ No se pudo obtener la sesión. Prueba de nuevo o revisa la consola (F12).';
+      err.innerHTML = '❌ La sesión no se activó. Suele pasar si el <strong>correo no está confirmado</strong>. Ve a Supabase → Authentication → Users, abre tu usuario y confirma el email o desactiva la confirmación obligatoria en Auth (solo pruebas).';
       err.style.display = 'block';
       btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
       return;
     }
 
-    const uid = sess.session.user.id;
+    const uid = activeSession.user.id;
+
     const { data: profile, error: perr } = await sb.from('profiles').select('role').eq('id', uid).maybeSingle();
     if (perr) {
       AppLog.error('profiles lookup', perr);
@@ -663,21 +702,25 @@ async function doSuperLogin(){
     }
     if (!profile) {
       await sb.auth.signOut();
-      err.textContent = '❌ No existe fila en public.profiles para tu usuario. En Supabase → Table Editor → profiles, crea una fila con id = tu UUID de auth.users y role = super_admin.';
+      err.innerHTML = '❌ No hay fila en <code>public.profiles</code> para tu cuenta. ' +
+        'En Supabase → SQL Editor ejecuta el script <strong>fix-super-admin-by-email.sql</strong> (reemplaza el correo) ' +
+        'o en Table Editor → profiles crea la fila: <code>id</code> = UUID de Authentication → Users, <code>role</code> = super_admin.';
       err.style.display = 'block';
       btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
       return;
     }
-    const rol = String(profile.role || '');
+    const rol = String(profile.role || '').trim();
     if (rol !== 'super_admin'){
       await sb.auth.signOut();
-      err.textContent = '⛔ Tu rol actual es «' + rol + '». Solo «super_admin» puede entrar. En Supabase → profiles → edita role a super_admin para tu usuario.';
+      err.innerHTML = '⛔ Tu rol en la base de datos es «<strong>' + rol + '</strong>», no super_admin. ' +
+        'El panel no puede cambiarlo solo: abre Supabase → SQL Editor y ejecuta el archivo del proyecto ' +
+        '<strong>fix-super-admin-by-email.sql</strong> con tu correo, o en Table Editor edita tu fila en <code>profiles</code> y pon role = super_admin.';
       err.style.display = 'block';
       btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
       return;
     }
 
-    $('sa-user-label').textContent = sess.session.user.email || data.user.email;
+    $('sa-user-label').textContent = activeSession.user.email || '';
     $('login-screen').style.display = 'none';
     $('app').style.display = 'flex';
     loadDashboard();
