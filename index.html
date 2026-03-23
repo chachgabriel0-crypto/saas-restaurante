@@ -65,7 +65,10 @@ body{font-family:var(--font-body);background:var(--g50);color:var(--g800);min-he
 .btn-coral{background:var(--coral);color:#fff}.btn-coral:hover{background:#d85f3d}
 .btn-gold{background:var(--gold);color:var(--navy)}.btn-gold:hover{background:#d4a843}
 .btn-sm{padding:7px 13px;font-size:.84rem;border-radius:6px}.btn-xs{padding:4px 9px;font-size:.77rem;border-radius:5px}
-.login-error{background:#fee;color:#c53030;border-radius:var(--r-sm);padding:11px 15px;margin-bottom:15px;font-size:.88rem;display:none}
+.login-error{background:#fee;color:#c53030;border-radius:var(--r-sm);padding:11px 15px;margin-bottom:15px;font-size:.88rem;display:none;line-height:1.45}
+.login-error .login-err-title{margin:0 0 8px;font-weight:700}
+.login-error .login-err-text{margin:0 0 12px;color:var(--g600);font-size:.86rem}
+.login-error .login-err-hint{margin:12px 0 0;font-size:.76rem;color:var(--g400)}
 #lock-warning{background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:var(--r-sm);padding:10px 14px;margin-bottom:12px;font-size:.85rem;display:none}
 
 /* ============================================================
@@ -881,7 +884,13 @@ async function doCloudLogin() {
     const roleStr = String(profile.role || '');
     if (roleStr === 'super_admin') {
       await sb.auth.signOut();
-      showLoginError('Esta cuenta es de super administrador. Abre super-admin.html para licencias y empresas; el POS es solo para personal del restaurante (staff / admin de empresa).');
+      showLoginError('', {
+        html: '<p class="login-err-title">Cuenta reconocida: super administrador</p>' +
+          '<p class="login-err-text">Esta pantalla es el <strong>POS</strong> (mesas y cobros). Tu rol gestiona <strong>empresas y licencias</strong> en otro panel.</p>' +
+          '<a href="./super-admin.html" class="btn btn-primary btn-full" style="text-decoration:none;display:block;text-align:center">Ir al panel Super Admin</a>' +
+          '<p class="login-err-hint">Para operar caja, usa un usuario <em>staff</em> o <em>admin de empresa</em> con restaurante asignado en Supabase.</p>',
+        durationMs: 0
+      });
       return;
     }
     if (!profile.empresa_id) {
@@ -1110,10 +1119,20 @@ async function doLogin() {
   await doCloudLogin();
 }
 
-function showLoginError(msg) {
+function showLoginError(msg, opts) {
   const el = document.getElementById('login-error');
-  el.textContent = '❌ ' + msg; el.style.display = 'block';
-  setTimeout(() => el.style.display = 'none', 4000);
+  if (!el) return;
+  clearTimeout(el._hideT);
+  if (opts && typeof opts.html === 'string') {
+    el.innerHTML = opts.html;
+  } else {
+    el.textContent = '❌ ' + (msg || '');
+  }
+  el.style.display = 'block';
+  const dur = opts && typeof opts.durationMs === 'number' ? opts.durationMs : 4000;
+  if (dur > 0) {
+    el._hideT = setTimeout(() => { el.style.display = 'none'; }, dur);
+  }
 }
 
 async function doLogout() {
