@@ -662,6 +662,7 @@ GROUP BY v.empresa_id, e.nombre, DATE_TRUNC('month', v.created_at);
 
 -- ============================================================
 -- FIN DEL ESQUEMA
+-- Producción: ejecutar también supabase-production-hardening.sql (RLS endurecido, RPC dashboard, índices).
 -- ============================================================
 -- PASOS SIGUIENTES (después de ejecutar este SQL):
 -- 1) Ve a Authentication → Users → "Add user" → crea tu cuenta super admin

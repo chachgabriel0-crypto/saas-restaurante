@@ -14,7 +14,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./logo.png">
 <link rel="apple-touch-icon" href="./logo.png">
-<title>Restaurante — POS v3.2</title>
+<title>Sistema de Gestión de Restaurante</title>
 <style>
 /* ============================================================
    DESIGN TOKENS
@@ -326,12 +326,17 @@ textarea{resize:vertical;min-height:78px}
 /* Changelog modal */
 .changelog-entry{border-left:3px solid var(--mint);padding:8px 12px;margin-bottom:10px;background:var(--mint-light);border-radius:0 6px 6px 0}
 .changelog-entry h4{font-size:.9rem;font-weight:700;color:var(--navy)}.changelog-entry p{font-size:.8rem;color:var(--g600);margin-top:3px}
+#login-mode-row{display:none;justify-content:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+#login-mode-row button{font-size:.78rem;padding:6px 12px;border-radius:20px;border:2px solid var(--g200);background:var(--white);cursor:pointer;color:var(--g600)}
+#login-mode-row button.mode-on{border-color:var(--mint);background:var(--mint-light);color:var(--mint-dark);font-weight:700}
 /* Dark toggle button */
 .dark-toggle{background:none;border:1px solid rgba(255,255,255,.3);color:#fff;padding:5px 10px;border-radius:20px;cursor:pointer;font-size:.78rem;transition:var(--tr)}
 .dark-toggle:hover{background:rgba(255,255,255,.15)}
 /* Integrity status */
 .integrity-ok{color:#22c55e}.integrity-fail{color:var(--coral)}
 </style>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -342,12 +347,16 @@ textarea{resize:vertical;min-height:78px}
       <img src="./logo.png" alt="Restaurante">
       <h1 class="login-title">Restaurante</h1>
       <p class="login-tagline">Carta, mesas y cobro — todo en un solo lugar</p>
-      <p style="color:var(--g400);font-size:.8rem;margin-top:10px">Sistema POS · v3.2</p>
+      <p style="color:var(--g400);font-size:.8rem;margin-top:10px">Sistema POS · v3.3</p>
     </div>
     <div id="lock-warning"></div>
     <div class="login-error" id="login-error"></div>
+    <div id="login-mode-row" aria-label="Modo de acceso">
+      <button type="button" id="btn-mode-cloud" class="mode-on">☁️ Cuenta en la nube</button>
+      <button type="button" id="btn-mode-local">💻 Solo este dispositivo</button>
+    </div>
     <div class="form-group">
-      <label>Usuario</label>
+      <label id="login-user-label">Usuario</label>
       <input type="text" id="login-user" placeholder="Tu usuario" autocomplete="username">
     </div>
     <div class="form-group">
@@ -360,7 +369,7 @@ textarea{resize:vertical;min-height:78px}
     <div id="attempts-indicator" style="font-size:.8rem;color:#c53030;margin-bottom:10px;display:none"></div>
     <button class="btn btn-primary btn-full" onclick="doLogin()">🔐 Ingresar</button>
       <p style="text-align:center;color:var(--g400);font-size:.75rem;margin-top:18px">
-    🔒 Cifrado seguro · Sesión protegida · v3.2
+    <span id="login-footer-hint">🔒 Cifrado seguro · Sesión protegida · v3.3</span>
   </p>
   </div>
 </div>
@@ -372,7 +381,7 @@ textarea{resize:vertical;min-height:78px}
       <button type="button" class="hamburger hamburger-left" onclick="toggleSidebarMesas()" title="Mesas" aria-label="Abrir menú de mesas">☰</button>
       <img src="./logo.png" alt="Restaurante">
       <h2>Restaurante</h2>
-      <span class="version-badge">v3.2</span>
+      <span class="version-badge">v3.3</span>
     </div>
     <nav class="topbar-nav" id="topbar-nav" aria-hidden="true"></nav>
     <div class="topbar-actions">
@@ -421,6 +430,7 @@ textarea{resize:vertical;min-height:78px}
   <div class="modal" style="max-width:500px">
     <div class="modal-header"><h3 class="modal-title">📋 Historial de Cambios</h3><button class="modal-close" onclick="closeModal('modal-changelog')">×</button></div>
     <div class="modal-body">
+      <div class="changelog-entry"><h4>v3.3 — 2026</h4><p>Sincronización en la nube con Supabase: misma cuenta en todos los dispositivos. Tabla pos_workspace_state + login con correo (modo nube) o modo local solo en este navegador.</p></div>
       <div class="changelog-entry"><h4>v3.2 — 2025</h4><p>Auditoría expandible: ver items ordenados al cancelar una orden o remover un cliente. Recibo adaptable a 3 formatos (Térmica 80mm, Carta, A4) — el diseño se ajusta automáticamente. Datos completos en todos los formatos.</p></div>
       <div class="changelog-entry"><h4>v3.1 — 2025</h4><p>Logo oficial integrado. Recibo térmico 80mm completo (imprime igual en papel o PDF). Diseño renovado de mesas y tablero de cocina. Comisión POS con nota clara de que la paga el negocio. Compartir recibo como PDF. Datos completos en comprobante: número de folio, vendedor, fecha completa, hora exacta, detalle por unidad y total.</p></div>
       <div class="changelog-entry"><h4>v3.0 — 2025</h4><p>IndexedDB como almacenamiento principal. SHA-256 para credenciales. Cifrado AES para datos sensibles. Checksum en exportación. Bitácora de auditoría inmutable. Bloqueo por intentos fallidos. Cierre automático por inactividad. Modo oscuro. Migración automática desde v2.x.</p></div>
@@ -436,7 +446,7 @@ textarea{resize:vertical;min-height:78px}
 /* ============================================================
    SYSTEM CONSTANTS
    ============================================================ */
-const APP_VERSION      = '3.2.0';
+const APP_VERSION      = '3.3.0';
 const LOGO_B64 = './logo.png';
 const SCHEMA_VERSION   = 5;
 const DB_NAME          = 'RestaurantePOS_v1_2026';
@@ -566,22 +576,62 @@ const Database = (() => {
 })();
 
 /* ============================================================
-   MODULE: ERROR HANDLER
+   MODULE: ERROR HANDLER + LOGS (memoria + opcional persistencia en DB)
    ============================================================ */
 const ErrorHandler = (() => {
   const log_arr = [];
+  const LEVEL = { debug: 10, info: 20, warn: 30, error: 40 };
 
-  function log(msg, err = null) {
-    const entry = { ts: new Date().toISOString(), msg, err: err ? String(err) : null };
+  function persistToDb(level, msg, err) {
+    if (level < LEVEL.warn) return;
+    try {
+      if (!DB || !Array.isArray(DB.errorLog)) return;
+      const detail = err ? (err.stack || String(err)) : null;
+      DB.errorLog.push({
+        id: uid(),
+        ts: now(),
+        level: level >= LEVEL.error ? 'error' : 'warn',
+        msg,
+        detail
+      });
+      if (DB.errorLog.length > 500) DB.errorLog.shift();
+      /* No llamar saveDB aquí (evita recursión si falla el guardado); el autosave lo persiste. */
+    } catch (_) { /* evitar bucle */ }
+  }
+
+  function log(msg, err = null, opts = {}) {
+    let level = opts.level === 'error' ? LEVEL.error : opts.level === 'warn' ? LEVEL.warn : null;
+    if (level == null) level = err ? LEVEL.error : LEVEL.info;
+    const entry = {
+      ts: new Date().toISOString(),
+      msg,
+      err: err ? (err.stack || String(err)) : null
+    };
     log_arr.push(entry);
     if (log_arr.length > 200) log_arr.shift();
-    console.warn('[LaOla]', msg, err || '');
+    if (level >= LEVEL.warn) {
+      (level >= LEVEL.error ? console.error : console.warn)('[LaOla]', msg, err || '');
+    } else if (opts.debug) {
+      console.debug('[LaOla]', msg, err || '');
+    }
+    persistToDb(level, msg, err);
   }
 
   function getLogs() { return [...log_arr]; }
 
-  return { log, getLogs };
+  function installGlobalHandlers() {
+    window.addEventListener('error', ev => {
+      log('window.error: ' + (ev.message || 'unknown'), ev.error || null, { level: 'error' });
+    });
+    window.addEventListener('unhandledrejection', ev => {
+      const r = ev.reason;
+      log('unhandledrejection: ' + (r && r.message ? r.message : String(r)), r instanceof Error ? r : null, { level: 'error' });
+    });
+  }
+
+  return { log, getLogs, installGlobalHandlers, LEVEL };
 })();
+ErrorHandler.installGlobalHandlers();
 
 /* ============================================================
    MODULE: AUDIT LOG (append-only)
@@ -649,6 +699,234 @@ let inactivityTimer = null;
 let inactivityWarnTimer = null;
 let inactivityCountdownInterval = null;
 let _saveQueued = false;
+
+/* ============================================================
+   SUPABASE — sincronización en la nube (misma cuenta en todos los dispositivos)
+   Requiere: config.js + tabla pos_workspace_state (ver supabase-pos-sync.sql)
+   ============================================================ */
+let sb = null;
+let empresaId = null;
+let posCloudChannel = null;
+let useCloudLogin = true;
+
+function initCloudClient() {
+  const cfg = window.RESTAURANTE_CONFIG || {};
+  const url = String(cfg.supabaseUrl || '').trim();
+  const key = String(cfg.supabaseAnonKey || '').trim();
+  if (!url || !key || typeof window.supabase === 'undefined') return;
+  try {
+    const { createClient } = window.supabase;
+    sb = createClient(url, key, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    });
+  } catch (e) {
+    ErrorHandler.log('initCloudClient', e);
+    sb = null;
+  }
+}
+
+function initLoginModeUI() {
+  const row = document.getElementById('login-mode-row');
+  const lbl = document.getElementById('login-user-label');
+  const inp = document.getElementById('login-user');
+  const foot = document.getElementById('login-footer-hint');
+  const bCloud = document.getElementById('btn-mode-cloud');
+  const bLocal = document.getElementById('btn-mode-local');
+  if (!row || !lbl || !inp) return;
+  if (!sb) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = 'flex';
+  const setMode = (cloud) => {
+    useCloudLogin = cloud;
+    try { localStorage.setItem('pos_login_mode', cloud ? 'cloud' : 'local'); } catch (_) {}
+    lbl.textContent = cloud ? 'Correo electrónico' : 'Usuario';
+    inp.placeholder = cloud ? 'tu@correo.com' : 'Tu usuario';
+    inp.type = cloud ? 'email' : 'text';
+    inp.autocomplete = cloud ? 'email' : 'username';
+    if (bCloud) bCloud.classList.toggle('mode-on', cloud);
+    if (bLocal) bLocal.classList.toggle('mode-on', !cloud);
+    if (foot) foot.textContent = cloud
+      ? '☁️ Datos sincronizados en Supabase · Misma cuenta en todos los equipos'
+      : '🔒 Modo local: datos solo en este navegador';
+  };
+  if (bCloud) bCloud.onclick = () => setMode(true);
+  if (bLocal) bLocal.onclick = () => setMode(false);
+  let mode = 'cloud';
+  try { mode = localStorage.getItem('pos_login_mode') || 'cloud'; } catch (_) {}
+  setMode(mode !== 'local');
+}
+
+async function loadCloudSnapshotIntoDB() {
+  if (!sb || !empresaId) return;
+  const { data, error } = await sb.from('pos_workspace_state').select('payload, updated_at').eq('empresa_id', empresaId).maybeSingle();
+  if (error) {
+    ErrorHandler.log('loadCloudSnapshot', error);
+    return;
+  }
+  if (data && data.payload && typeof data.payload === 'object') {
+    DB = migrateData(JSON.parse(JSON.stringify(data.payload)));
+    verifyIntegrity();
+    try { await Database.save(DB); } catch (e) { ErrorHandler.log('cache after cloud load', e); }
+  }
+}
+
+async function pushCloudSnapshot() {
+  if (!sb || !empresaId || !currentUser || !currentUser.cloud) return;
+  try {
+    const payload = JSON.parse(JSON.stringify(DB));
+    const { error } = await sb.from('pos_workspace_state').upsert({
+      empresa_id: empresaId,
+      payload,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser.id
+    }, { onConflict: 'empresa_id' });
+    if (error) throw error;
+  } catch (e) {
+    ErrorHandler.log('pushCloudSnapshot', e);
+    showToast('⚠️ No se pudo guardar en la nube. Revisa conexión o tabla pos_workspace_state.', 4000);
+  }
+}
+
+function unsubscribePosRealtime() {
+  if (posCloudChannel && sb) {
+    try { sb.removeChannel(posCloudChannel); } catch (_) {}
+    posCloudChannel = null;
+  }
+}
+
+function subscribePosRealtime() {
+  if (!sb || !empresaId || !currentUser || !currentUser.cloud) return;
+  unsubscribePosRealtime();
+  const filter = 'empresa_id=eq.' + empresaId;
+  posCloudChannel = sb.channel('pos-workspace-' + empresaId)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_workspace_state', filter }, async () => {
+      await loadCloudSnapshotIntoDB();
+      try {
+        buildSidebar();
+        if (typeof renderPage === 'function' && typeof currentPage !== 'undefined') renderPage(currentPage);
+      } catch (_) {}
+      showToast('🔁 Datos actualizados desde la nube', 2500);
+    })
+    .subscribe();
+}
+
+async function tryRestoreCloudSession() {
+  if (!sb) return false;
+  try {
+    const { data: { session }, error: sErr } = await sb.auth.getSession();
+    if (sErr || !session) return false;
+    const { data: profile, error: pErr } = await sb.from('profiles')
+      .select('id, role, nombre_visible, empresa_id, activo')
+      .eq('id', session.user.id)
+      .maybeSingle();
+    if (pErr || !profile || !profile.empresa_id) {
+      await sb.auth.signOut();
+      return false;
+    }
+    if (profile.activo === false) {
+      await sb.auth.signOut();
+      return false;
+    }
+    if (profile.role === 'super_admin') {
+      await sb.auth.signOut();
+      return false;
+    }
+    empresaId = profile.empresa_id;
+    currentUser = {
+      id: profile.id,
+      username: profile.nombre_visible || (session.user.email && session.user.email.split('@')[0]) || 'usuario',
+      role: profile.role === 'empresa_admin' ? 'admin' : 'seller',
+      cloud: true
+    };
+    await loadCloudSnapshotIntoDB();
+    sessionStorage.setItem(SESSION_KEY, currentUser.id);
+    sessionStorage.setItem('pos_cloud', '1');
+    subscribePosRealtime();
+    return true;
+  } catch (e) {
+    ErrorHandler.log('tryRestoreCloudSession', e);
+    return false;
+  }
+}
+
+async function doCloudLogin() {
+  if (checkLock()) return;
+  const email = (document.getElementById('login-user')?.value || '').trim();
+  const pw = document.getElementById('login-pw').value;
+  if (!email) { showLoginError('Ingresa tu correo'); return; }
+  if (!pw) { showLoginError('Ingresa tu contraseña'); return; }
+  if (!sb) { showLoginError('Falta configuración: config.js con Supabase'); return; }
+  try {
+    const { error } = await sb.auth.signInWithPassword({ email, password: pw });
+    if (error) {
+      failedAttempts++;
+      const rem = MAX_FAIL_ATTEMPTS - failedAttempts;
+      const attEl = document.getElementById('attempts-indicator');
+      attEl.style.display = 'block';
+      if (rem <= 0) {
+        lockUntil = Date.now() + LOCK_MINUTES * 60000;
+        failedAttempts = 0;
+        attEl.style.display = 'none';
+        showLoginError(`Sistema bloqueado ${LOCK_MINUTES} min por exceso de intentos.`);
+        return;
+      }
+      attEl.textContent = `Intento fallido. ${rem} intento(s) restante(s).`;
+      showLoginError(error.message === 'Invalid login credentials' ? 'Credenciales incorrectas' : error.message);
+      return;
+    }
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) {
+      showLoginError('No se obtuvo sesión');
+      return;
+    }
+    const { data: profile, error: pErr } = await sb.from('profiles')
+      .select('id, role, nombre_visible, empresa_id, activo')
+      .eq('id', session.user.id)
+      .maybeSingle();
+    if (pErr || !profile) {
+      await sb.auth.signOut();
+      showLoginError('No se encontró tu perfil en la base de datos.');
+      return;
+    }
+    if (!profile.empresa_id) {
+      await sb.auth.signOut();
+      showLoginError('Tu cuenta no está asignada a un restaurante. Pídele a un administrador que vincule tu usuario a una empresa.');
+      return;
+    }
+    if (profile.role === 'super_admin') {
+      await sb.auth.signOut();
+      showLoginError('Para super administrador usa super-admin.html, no el POS.');
+      return;
+    }
+    if (profile.activo === false) {
+      await sb.auth.signOut();
+      showLoginError('Tu cuenta está desactivada.');
+      return;
+    }
+    failedAttempts = 0;
+    document.getElementById('attempts-indicator').style.display = 'none';
+    empresaId = profile.empresa_id;
+    currentUser = {
+      id: profile.id,
+      username: profile.nombre_visible || email.split('@')[0],
+      role: profile.role === 'empresa_admin' ? 'admin' : 'seller',
+      cloud: true
+    };
+    await loadCloudSnapshotIntoDB();
+    sessionStorage.setItem(SESSION_KEY, currentUser.id);
+    sessionStorage.setItem('pos_cloud', '1');
+    AuditLog.append('LOGIN', { username: currentUser.username, role: currentUser.role, cloud: true });
+    await saveDB();
+    subscribePosRealtime();
+    startInactivityTimer();
+    showApp();
+  } catch (e) {
+    ErrorHandler.log('doCloudLogin', e);
+    showLoginError(e.message || 'Error de conexión');
+  }
+}
 
 /* ============================================================
    MODULE: CORE — DEFAULT DATA & MIGRATION
@@ -812,6 +1090,7 @@ async function saveDB() {
       DB.schemaVersion = SCHEMA_VERSION;
       DB.appVersion = APP_VERSION;
       await Database.save(DB);
+      if (currentUser && currentUser.cloud && sb && empresaId) await pushCloudSnapshot();
     } catch(e) {
       ErrorHandler.log('saveDB error', e);
       showToast('⚠️ Error al guardar datos', 4000);
@@ -835,6 +1114,10 @@ function checkLock() {
 
 async function doLogin() {
   if (checkLock()) return;
+  if (useCloudLogin && sb) {
+    await doCloudLogin();
+    return;
+  }
   const username = (document.getElementById('login-user')?.value || '').trim();
   const pw = document.getElementById('login-pw').value;
   if (!username) { showLoginError('Ingresa tu nombre de usuario'); return; }
@@ -906,21 +1189,29 @@ function showLoginError(msg) {
 }
 
 async function doLogout() {
+  unsubscribePosRealtime();
   if (currentUser) {
-    AuditLog.append('LOGOUT', { username: currentUser.username });
+    AuditLog.append('LOGOUT', { username: currentUser.username, cloud: !!currentUser.cloud });
     await saveDB();
   }
   stopInactivityTimer();
+  if (currentUser && currentUser.cloud && sb) {
+    try { await sb.auth.signOut(); } catch (_) {}
+  }
   currentUser = null;
+  empresaId = null;
   sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem('pos_cloud');
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-pw').value = '';
   const lu = document.getElementById('login-user'); if(lu) lu.value = '';
   initLogin();
+  initLoginModeUI();
 }
 
 function tryRestoreSession() {
+  if (sessionStorage.getItem('pos_cloud') === '1') return false;
   const sid = sessionStorage.getItem(SESSION_KEY);
   if (sid) {
     const u = (DB.users || []).find(x=>x.id===sid);
@@ -1002,6 +1293,8 @@ function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   document.getElementById('current-user-label').textContent = currentUser.username;
+  const sec = document.querySelector('.security-indicator span:last-child');
+  if (sec) sec.textContent = currentUser.cloud ? 'En la nube' : 'Local';
   applyDarkMode();
   buildNav(); buildSidebar(); navigateTo('mesas');
   markAttendance();
@@ -2831,8 +3124,12 @@ function renderBackupTab(el) {
     </div>
     <div class="card">
       <h4 style="color:var(--navy);margin-bottom:11px;font-weight:800">🔧 Registros de Error del Sistema</h4>
+      <p style="font-size:.78rem;color:var(--g400);margin-bottom:8px">Sesión en memoria (últimos 30) y persistidos en datos (últimos 15).</p>
       <div style="font-size:.8rem;color:var(--g600);max-height:200px;overflow-y:auto;background:var(--g50);padding:10px;border-radius:7px;font-family:monospace">
-        ${ErrorHandler.getLogs().slice(-30).reverse().map(e=>`<div>${e.ts.slice(0,19)} — ${e.msg}${e.err?' | '+e.err:''}</div>`).join('')||'Sin errores registrados'}
+        ${ErrorHandler.getLogs().slice(-30).reverse().map(e=>`<div>${e.ts.slice(0,19)} — ${e.msg}${e.err?' | '+e.err:''}</div>`).join('')||'Sin errores en memoria'}
+      </div>
+      <div style="font-size:.8rem;color:var(--g600);max-height:160px;overflow-y:auto;background:var(--g100);padding:10px;border-radius:7px;font-family:monospace;margin-top:8px">
+        ${(DB.errorLog||[]).slice(-15).reverse().map(e=>`<div>${(e.ts||'').slice(0,19)} — [${e.level||'warn'}] ${e.msg||''}${e.detail?' | '+e.detail:''}</div>`).join('')||'Sin errores persistidos aún'}
       </div>
     </div>`;
 }
@@ -2984,17 +3281,25 @@ setInterval(() => { if(currentUser) saveDB(); }, 30000);
 window.addEventListener('load', async () => {
   try {
     await Database.openIDB();
+    initCloudClient();
     await loadDB();
-    if (tryRestoreSession()) {
+    if (await tryRestoreCloudSession()) {
+      initLoginModeUI();
+      startInactivityTimer();
+      showApp();
+    } else if (tryRestoreSession()) {
+      initLoginModeUI();
       startInactivityTimer();
       showApp();
     } else {
       initLogin();
+      initLoginModeUI();
     }
   } catch(e) {
     ErrorHandler.log('Init error', e);
     DB = defaultData();
     initLogin();
+    initLoginModeUI();
   }
 });
 

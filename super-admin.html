@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 /* ============================================================
@@ -522,15 +523,55 @@ a{color:inherit;text-decoration:none}
 <script>
 'use strict';
 /* ============================================================
-   CONFIGURACIÓN SUPABASE
-   ⚠️  REEMPLAZA con tus valores reales de Supabase
-   Settings → API → Project URL y anon key
+   CONFIG: window.RESTAURANTE_CONFIG en config.js (ver config.example.js)
    ============================================================ */
-const SUPABASE_URL  = 'https://wzmamtyfhwjaqymisriz.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_HXakHkTuOikbYEwBNx1cug_hap7FrDT';
+const AppLog = (() => {
+  const max = 300;
+  const buf = [];
+  function push(level, args) {
+    const msg = args.map(a => {
+      if (a == null) return '';
+      if (typeof a === 'string') return a;
+      if (a instanceof Error) return a.message;
+      try { return JSON.stringify(a); } catch { return String(a); }
+    }).join(' ');
+    buf.push({ ts: new Date().toISOString(), level, msg });
+    if (buf.length > max) buf.shift();
+    (level === 'error' ? console.error : level === 'warn' ? console.warn : console.info)('[SuperAdmin]', msg);
+  }
+  return {
+    info: (...a) => push('info', a),
+    warn: (...a) => push('warn', a),
+    error: (...a) => push('error', a),
+    getRecent: () => [...buf]
+  };
+})();
+
+const cfg = window.RESTAURANTE_CONFIG || {};
+const SUPABASE_URL = String(cfg.supabaseUrl || '').trim();
+const SUPABASE_ANON = String(cfg.supabaseAnonKey || '').trim();
 
 const { createClient } = supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+const sb = (SUPABASE_URL && SUPABASE_ANON)
+  ? createClient(SUPABASE_URL, SUPABASE_ANON, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    })
+  : null;
+
+if (!sb) {
+  AppLog.error('Falta config.js: define supabaseUrl y supabaseAnonKey (copia config.example.js → config.js)');
+  window.addEventListener('DOMContentLoaded', () => {
+    const el = document.getElementById('login-err');
+    if (el) {
+      el.textContent = '⚠️ Sin credenciales de Supabase: rellena supabaseUrl y supabaseAnonKey en config.js (copia config.example.js).';
+      el.style.display = 'block';
+    }
+  });
+}
+
+function assertSb() {
+  if (!sb) throw new Error('Configura config.js con las credenciales de Supabase.');
+}
 
 /* ============================================================
    ESTADO GLOBAL
@@ -580,49 +621,92 @@ async function doSuperLogin(){
   const err   = $('login-err');
   err.style.display = 'none';
 
+  if (!sb) {
+    err.textContent = '⚠️ Crea config.js desde config.example.js y rellena URL y anon key.';
+    err.style.display = 'block';
+    return;
+  }
+
   if (!email || !pw){ err.textContent='Completa todos los campos'; err.style.display='block'; return; }
 
   btn.innerHTML = '<span class="loading"></span> Ingresando…';
   btn.disabled = true;
 
-  const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
-  if (error){
-    err.textContent = '❌ ' + (error.message === 'Invalid login credentials' ? 'Credenciales incorrectas' : error.message);
-    err.style.display = 'block';
-    btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
-    return;
-  }
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+    if (error){
+      AppLog.warn('signIn', error.message);
+      err.textContent = '❌ ' + (error.message === 'Invalid login credentials' ? 'Credenciales incorrectas' : error.message);
+      err.style.display = 'block';
+      btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
+      return;
+    }
 
-  // Verificar que sea super_admin
-  const { data: profile } = await sb.from('profiles').select('role').eq('id', data.user.id).single();
-  if (!profile || profile.role !== 'super_admin'){
-    await sb.auth.signOut();
-    err.textContent = '⛔ No tienes permisos de Super Administrador';
-    err.style.display = 'block';
-    btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
-    return;
-  }
+    const { data: sess } = await sb.auth.getSession();
+    if (!sess?.session) {
+      await sb.auth.signOut();
+      err.textContent = '❌ No se pudo obtener la sesión. Prueba de nuevo o revisa la consola (F12).';
+      err.style.display = 'block';
+      btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
+      return;
+    }
 
-  $('sa-user-label').textContent = data.user.email;
-  $('login-screen').style.display = 'none';
-  $('app').style.display = 'flex';
-  loadDashboard();
+    const uid = sess.session.user.id;
+    const { data: profile, error: perr } = await sb.from('profiles').select('role').eq('id', uid).maybeSingle();
+    if (perr) {
+      AppLog.error('profiles lookup', perr);
+      await sb.auth.signOut();
+      err.textContent = '❌ Error al leer tu perfil: ' + perr.message + ' (revisa RLS/políticas en tabla profiles).';
+      err.style.display = 'block';
+      btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
+      return;
+    }
+    if (!profile) {
+      await sb.auth.signOut();
+      err.textContent = '❌ No existe fila en public.profiles para tu usuario. En Supabase → Table Editor → profiles, crea una fila con id = tu UUID de auth.users y role = super_admin.';
+      err.style.display = 'block';
+      btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
+      return;
+    }
+    const rol = String(profile.role || '');
+    if (rol !== 'super_admin'){
+      await sb.auth.signOut();
+      err.textContent = '⛔ Tu rol actual es «' + rol + '». Solo «super_admin» puede entrar. En Supabase → profiles → edita role a super_admin para tu usuario.';
+      err.style.display = 'block';
+      btn.innerHTML = '🔐 Ingresar'; btn.disabled = false;
+      return;
+    }
+
+    $('sa-user-label').textContent = sess.session.user.email || data.user.email;
+    $('login-screen').style.display = 'none';
+    $('app').style.display = 'flex';
+    loadDashboard();
+  } catch (e) {
+    AppLog.error('doSuperLogin', e);
+    err.textContent = '❌ Error: ' + (e.message || e);
+    err.style.display = 'block';
+  } finally {
+    btn.innerHTML = '🔐 Ingresar';
+    btn.disabled = false;
+  }
 }
 
 async function doSuperLogout(){
+  if (!sb) return;
   await sb.auth.signOut();
   $('app').style.display = 'none';
   $('login-screen').style.display = 'flex';
   $('sa-pw').value = '';
 }
 
-// Verificar sesión al cargar
-sb.auth.onAuthStateChange((event, session) => {
-  if (event === 'SIGNED_OUT' || !session){
-    $('app').style.display = 'none';
-    $('login-screen').style.display = 'flex';
-  }
-});
+if (sb) {
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || !session){
+      $('app').style.display = 'none';
+      $('login-screen').style.display = 'flex';
+    }
+  });
+}
 
 /* ============================================================
    NAVIGATION
@@ -644,18 +728,50 @@ function switchTab(tab){
    DASHBOARD
    ============================================================ */
 async function loadDashboard(){
+  if (!sb) return;
   $('dashboard-subtitle').textContent = 'Actualizado ' + fmtDateTime(new Date().toISOString());
 
-  // Stats
-  const [{ count: totalEmpresas }, { count: activas }, { count: suspendidas }, { data: ventas_hoy }] = await Promise.all([
-    sb.from('empresas').select('*', { count:'exact', head:true }),
-    sb.from('empresas').select('*', { count:'exact', head:true }).eq('estado','activa'),
-    sb.from('empresas').select('*', { count:'exact', head:true }).eq('estado','suspendida'),
-    sb.from('ventas').select('total').gte('created_at', new Date().toISOString().split('T')[0])
-  ]);
+  let totalEmpresas = 0, activas = 0, suspendidas = 0, vencidas = 0;
+  let montoHoy = 0;
+  let ventasHoyN = 0;
 
-  const montoHoy = (ventas_hoy||[]).reduce((s,v) => s + parseFloat(v.total||0), 0);
-  const vencidas = await contarVencidas();
+  try {
+    assertSb();
+    const rpc = await sb.rpc('super_admin_dashboard_stats');
+    if (rpc.error) {
+      AppLog.warn('RPC super_admin_dashboard_stats', rpc.error.message);
+      const dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+      const [{ count: c0 }, { count: c1 }, { count: c2 }, { data: ventasRows, error: ve }, { count: cv }] = await Promise.all([
+        sb.from('empresas').select('id', { count: 'exact', head: true }),
+        sb.from('empresas').select('id', { count: 'exact', head: true }).eq('estado', 'activa'),
+        sb.from('empresas').select('id', { count: 'exact', head: true }).eq('estado', 'suspendida'),
+        sb.from('ventas').select('total').gte('created_at', dayStart.toISOString()),
+        sb.from('empresas').select('id', { count: 'exact', head: true })
+          .eq('estado', 'activa')
+          .lt('fecha_vencimiento', new Date().toISOString().split('T')[0])
+          .not('fecha_vencimiento', 'is', null)
+      ]);
+      if (ve) AppLog.error('ventas hoy', ve);
+      totalEmpresas = c0 || 0;
+      activas = c1 || 0;
+      suspendidas = c2 || 0;
+      vencidas = cv || 0;
+      ventasHoyN = (ventasRows || []).length;
+      montoHoy = (ventasRows || []).reduce((s, v) => s + parseFloat(v.total || 0), 0);
+    } else {
+      const s = rpc.data || {};
+      totalEmpresas = s.total_empresas ?? 0;
+      activas = s.activas ?? 0;
+      suspendidas = s.suspendidas ?? 0;
+      vencidas = s.vencidas ?? 0;
+      ventasHoyN = s.ventas_hoy_count ?? 0;
+      montoHoy = parseFloat(s.ventas_hoy_monto || 0);
+    }
+  } catch (e) {
+    AppLog.error('loadDashboard stats', e);
+    showToast('Error al cargar estadísticas', 'error');
+  }
 
   $('stats-grid').innerHTML = `
     <div class="stat-card" style="--accent-clr:rgba(124,58,237,.1)">
@@ -682,12 +798,20 @@ async function loadDashboard(){
       <div class="stat-icon">💰</div>
       <div class="stat-label">Ventas hoy (global)</div>
       <div class="stat-value" style="font-size:1.5rem">Q ${montoHoy.toFixed(2)}</div>
-      <div class="stat-sub">${(ventas_hoy||[]).length} transacciones</div>
+      <div class="stat-sub">${ventasHoyN} transacciones</div>
     </div>
   `;
 
-  // Empresas recientes
-  const { data: recientes } = await sb.from('empresas').select('*').order('created_at',{ascending:false}).limit(5);
+  let recientes = [];
+  try {
+    const { data: r, error: re } = await sb.from('empresas')
+      .select('id,nombre,logo_url,plan,moneda,created_at,estado,fecha_vencimiento')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (re) { AppLog.error('empresas recientes', re); showToast('Error al cargar empresas recientes', 'error'); }
+    else recientes = r || [];
+  } catch (e) { AppLog.error('recientes', e); }
+
   if (!recientes || recientes.length === 0){
     $('empresas-recientes-list').innerHTML = `<div class="empty"><span class="empty-icon">🏢</span><p>Aún no hay empresas registradas</p></div>`;
     return;
@@ -705,26 +829,22 @@ async function loadDashboard(){
   }).join('');
 }
 
-async function contarVencidas(){
-  const { count } = await sb.from('empresas')
-    .select('*',{count:'exact',head:true})
-    .eq('estado','activa')
-    .lt('fecha_vencimiento', new Date().toISOString().split('T')[0])
-    .not('fecha_vencimiento','is',null);
-  return count || 0;
-}
-
 /* ============================================================
    EMPRESAS
    ============================================================ */
 async function loadEmpresas(){
+  if (!sb) return;
   $('empresas-list').innerHTML = `<div class="empty"><span class="loading"></span></div>`;
-  let query = sb.from('empresas').select('*').order('created_at',{ascending:false});
+  let query = sb.from('empresas').select('id,nombre,logo_url,estado,plan,moneda,fecha_vencimiento,created_at').order('created_at',{ascending:false});
   const filtro = $('filtro-estado').value;
   if (filtro) query = query.eq('estado', filtro);
 
   const { data, error } = await query;
-  if (error){ $('empresas-list').innerHTML = `<div class="empty">Error: ${error.message}</div>`; return; }
+  if (error){
+    AppLog.error('loadEmpresas', error.message);
+    $('empresas-list').innerHTML = `<div class="empty">Error: ${error.message}</div>`;
+    return;
+  }
   empresasCache = data || [];
 
   if (!data || data.length === 0){
@@ -767,6 +887,7 @@ function openModalNuevaEmpresa(){
 }
 
 async function crearEmpresa(){
+  if (!sb) return;
   const nombre = $('e-nombre').value.trim();
   if (!nombre){ showModalAlert('modal-alert','Ingresa el nombre de la empresa','error'); return; }
 
@@ -774,6 +895,7 @@ async function crearEmpresa(){
   btn.innerHTML = '<span class="loading"></span> Creando…';
   btn.disabled = true;
 
+  try {
   const { data, error } = await sb.rpc('crear_empresa', {
     p_nombre:            nombre,
     p_moneda:            $('e-moneda').value,
@@ -782,18 +904,22 @@ async function crearEmpresa(){
   });
 
   if (error){
+    AppLog.error('crear_empresa rpc', error.message);
     showModalAlert('modal-alert', 'Error: ' + error.message, 'error');
     btn.innerHTML = '✅ Crear empresa'; btn.disabled = false;
     return;
   }
 
-  // Actualizar email/teléfono/dirección si se indicaron
   const updates = {};
   if ($('e-email').value)     updates.email_contacto = $('e-email').value;
   if ($('e-telefono').value)  updates.telefono       = $('e-telefono').value;
   if ($('e-direccion').value) updates.direccion      = $('e-direccion').value;
   if (Object.keys(updates).length > 0){
-    await sb.from('empresas').update(updates).eq('id', data);
+    const { error: uerr } = await sb.from('empresas').update(updates).eq('id', data);
+    if (uerr) {
+      AppLog.error('empresa update post-create', uerr.message);
+      showToast('Empresa creada pero no se guardaron contacto/dirección: ' + uerr.message, 'error');
+    }
   }
 
   showToast('✅ Empresa creada exitosamente');
@@ -801,6 +927,11 @@ async function crearEmpresa(){
   btn.innerHTML = '✅ Crear empresa'; btn.disabled = false;
   if (currentTab === 'empresas') loadEmpresas();
   loadDashboard();
+  } catch (e) {
+    AppLog.error('crearEmpresa', e);
+    showModalAlert('modal-alert', 'Error: ' + (e.message || e), 'error');
+    btn.innerHTML = '✅ Crear empresa'; btn.disabled = false;
+  }
 }
 
 function editarEmpresa(id){
@@ -818,6 +949,7 @@ function editarEmpresa(id){
 }
 
 async function guardarEmpresa(){
+  if (!sb) return;
   const id = $('ee-id').value;
   const nombre = $('ee-nombre').value.trim();
   if (!nombre){ showModalAlert('modal-editar-alert','Ingresa el nombre','error'); return; }
@@ -825,6 +957,7 @@ async function guardarEmpresa(){
   const btn = $('btn-guardar-empresa');
   btn.innerHTML = '<span class="loading"></span> Guardando…'; btn.disabled = true;
 
+  try {
   const updates = {
     nombre,
     estado:            $('ee-estado').value,
@@ -836,6 +969,7 @@ async function guardarEmpresa(){
 
   const { error } = await sb.from('empresas').update(updates).eq('id', id);
   if (error){
+    AppLog.error('guardarEmpresa', error.message);
     showModalAlert('modal-editar-alert','Error: ' + error.message, 'error');
     btn.innerHTML = '💾 Guardar cambios'; btn.disabled = false;
     return;
@@ -845,16 +979,23 @@ async function guardarEmpresa(){
   closeModal('modal-editar');
   btn.innerHTML = '💾 Guardar cambios'; btn.disabled = false;
   loadEmpresas();
+  } catch (e) {
+    AppLog.error('guardarEmpresa', e);
+    showModalAlert('modal-editar-alert', 'Error: ' + (e.message || e), 'error');
+    btn.innerHTML = '💾 Guardar cambios'; btn.disabled = false;
+  }
 }
 
 async function cambiarEstado(id, nuevoEstado){
+  if (!sb) return;
   const { error } = await sb.from('empresas').update({ estado: nuevoEstado }).eq('id', id);
-  if (error){ showToast('Error: ' + error.message, 'error'); return; }
+  if (error){ AppLog.error('cambiarEstado', error.message); showToast('Error: ' + error.message, 'error'); return; }
   showToast(nuevoEstado === 'activa' ? '✅ Empresa activada' : '🚫 Empresa suspendida');
   loadEmpresas();
 }
 
 async function renovar30(id){
+  if (!sb) return;
   const e = empresasCache.find(x => x.id === id);
   if (!e) return;
   const base = (e.fecha_vencimiento && new Date(e.fecha_vencimiento) > new Date())
@@ -863,7 +1004,7 @@ async function renovar30(id){
   const nueva = base.toISOString().split('T')[0];
 
   const { error } = await sb.from('empresas').update({ fecha_vencimiento: nueva, estado: 'activa' }).eq('id', id);
-  if (error){ showToast('Error: ' + error.message, 'error'); return; }
+  if (error){ AppLog.error('renovar30', error.message); showToast('Error: ' + error.message, 'error'); return; }
   showToast('📅 Renovada 30 días → ' + nueva);
   loadEmpresas();
 }
@@ -872,14 +1013,17 @@ async function renovar30(id){
    USUARIOS
    ============================================================ */
 async function loadUsuarios(){
+  if (!sb) return;
   $('usuarios-tbody').innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px"><span class="loading"></span></td></tr>`;
 
   const { data: perfiles, error } = await sb.from('profiles')
     .select('id, role, nombre_visible, activo, empresa_id, created_at, empresas(nombre)');
 
-  const { data: authUsers } = await sb.auth.admin?.listUsers() || { data: null };
-
-  if (error){ $('usuarios-tbody').innerHTML = `<tr><td colspan="6">Error: ${error.message}</td></tr>`; return; }
+  if (error){
+    AppLog.error('loadUsuarios', error.message);
+    $('usuarios-tbody').innerHTML = `<tr><td colspan="6">Error: ${error.message}</td></tr>`;
+    return;
+  }
 
   const rows = (perfiles||[]).map(p => {
     const rolBadge = p.role === 'super_admin' ? 'badge-purple' : p.role === 'empresa_admin' ? 'badge-blue' : 'badge-green';
@@ -900,11 +1044,12 @@ async function loadUsuarios(){
 }
 
 async function cambiarRol(uid, rolActual){
+  if (!sb) return;
   const roles = ['staff','empresa_admin','super_admin'];
   const nuevo = prompt(`Rol actual: ${rolActual}\nNuevo rol (staff / empresa_admin / super_admin):`);
   if (!nuevo || !roles.includes(nuevo)) return;
   const { error } = await sb.from('profiles').update({ role: nuevo }).eq('id', uid);
-  if (error){ showToast('Error: ' + error.message, 'error'); return; }
+  if (error){ AppLog.error('cambiarRol', error.message); showToast('Error: ' + error.message, 'error'); return; }
   showToast('✅ Rol actualizado a ' + nuevo);
   loadUsuarios();
 }
@@ -913,14 +1058,19 @@ async function cambiarRol(uid, rolActual){
    AUDITORÍA
    ============================================================ */
 async function loadAuditoria(){
+  if (!sb) return;
   $('audit-tbody').innerHTML = `<tr><td colspan="5" style="text-align:center;padding:30px"><span class="loading"></span></td></tr>`;
 
   const { data, error } = await sb.from('auditoria')
-    .select('*, empresas(nombre), profiles(nombre_visible)')
+    .select('id, created_at, accion, detalles, user_id, empresa_id, empresas(nombre), profiles(nombre_visible)')
     .order('created_at', { ascending: false })
     .limit(100);
 
-  if (error){ $('audit-tbody').innerHTML = `<tr><td colspan="5">Error: ${error.message}</td></tr>`; return; }
+  if (error){
+    AppLog.error('loadAuditoria', error.message);
+    $('audit-tbody').innerHTML = `<tr><td colspan="5">Error: ${error.message}</td></tr>`;
+    return;
+  }
 
   const rows = (data||[]).map(a => `<tr>
     <td style="font-size:.78rem;white-space:nowrap">${fmtDateTime(a.created_at)}</td>
@@ -947,15 +1097,26 @@ function showModalAlert(id, msg, type='error'){
    INIT — verificar sesión existente
    ============================================================ */
 (async () => {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) {
-    const { data: p } = await sb.from('profiles').select('role').eq('id', session.user.id).single();
-    if (p && p.role === 'super_admin'){
-      $('sa-user-label').textContent = session.user.email;
-      $('login-screen').style.display = 'none';
-      $('app').style.display = 'flex';
-      loadDashboard();
+  if (!sb) return;
+  try {
+    const { data: { session }, error } = await sb.auth.getSession();
+    if (error) AppLog.warn('getSession', error.message);
+    if (!session) return;
+    const { data: p, error: perr } = await sb.from('profiles').select('role').eq('id', session.user.id).maybeSingle();
+    if (perr) {
+      AppLog.error('init profile', perr.message);
+      return;
     }
+    if (!p || String(p.role || '') !== 'super_admin') {
+      if (session) await sb.auth.signOut();
+      return;
+    }
+    $('sa-user-label').textContent = session.user.email;
+    $('login-screen').style.display = 'none';
+    $('app').style.display = 'flex';
+    loadDashboard();
+  } catch (e) {
+    AppLog.error('init session', e);
   }
 })();
 </script>
