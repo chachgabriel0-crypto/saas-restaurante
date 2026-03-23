@@ -77,6 +77,12 @@ a{color:inherit;text-decoration:none}
   transition:var(--tr);box-shadow:0 4px 20px rgba(124,58,237,.4);
 }
 .btn-login:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(124,58,237,.55)}
+.btn-forgot-pw{
+  width:100%;margin-top:14px;padding:0;border:none;background:none;
+  color:var(--blue);font-size:.84rem;font-weight:600;cursor:pointer;font-family:inherit;
+  text-decoration:underline;text-underline-offset:3px;
+}
+.btn-forgot-pw:hover{color:#93c5fd}
 .login-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:8px;padding:10px 14px;font-size:.82rem;margin-bottom:14px;display:none;line-height:1.45;max-width:100%}
 .login-err code{font-size:.78rem;background:rgba(0,0,0,.25);padding:1px 5px;border-radius:4px}
 .login-help pre{margin:8px 0 0;font-family:ui-monospace,monospace}
@@ -253,15 +259,30 @@ a{color:inherit;text-decoration:none}
     <h1 class="login-title">Super Admin</h1>
     <p class="login-sub">Panel de control del sistema SaaS</p>
     <div class="login-err" id="login-err"></div>
-    <div class="fg">
-      <label>Email</label>
-      <input type="email" id="sa-email" placeholder="super@tudominio.com" autocomplete="email">
+    <div id="login-form-normal">
+      <div class="fg">
+        <label>Email</label>
+        <input type="email" id="sa-email" placeholder="super@tudominio.com" autocomplete="email">
+      </div>
+      <div class="fg">
+        <label>Contraseña</label>
+        <input type="password" id="sa-pw" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="btn-login" onclick="doSuperLogin()" id="login-btn">🔐 Ingresar</button>
+      <button type="button" class="btn-forgot-pw" onclick="openRecoverPasswordModal()">¿Olvidaste tu contraseña?</button>
     </div>
-    <div class="fg">
-      <label>Contraseña</label>
-      <input type="password" id="sa-pw" placeholder="••••••••" autocomplete="current-password">
+    <div id="login-form-recovery" style="display:none">
+      <p style="color:var(--gray);font-size:.88rem;margin-bottom:16px;line-height:1.45">Elegí una contraseña nueva para tu cuenta.</p>
+      <div class="fg">
+        <label>Nueva contraseña</label>
+        <input type="password" id="sa-new-pw1" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+      </div>
+      <div class="fg">
+        <label>Confirmar contraseña</label>
+        <input type="password" id="sa-new-pw2" placeholder="Repite la contraseña" autocomplete="new-password">
+      </div>
+      <button type="button" class="btn-login" onclick="completePasswordRecovery()">Guardar nueva contraseña</button>
     </div>
-    <button class="btn-login" onclick="doSuperLogin()" id="login-btn">🔐 Ingresar</button>
     <details class="login-help" style="margin-top:22px;text-align:left">
       <summary style="cursor:pointer;color:var(--gray);font-size:.82rem">No entra / se frustra — leer esto</summary>
       <div style="margin-top:10px;font-size:.78rem;color:var(--gray);line-height:1.5">
@@ -272,8 +293,30 @@ SELECT id, 'super_admin'::public.app_role FROM auth.users
 WHERE lower(email)=lower('tu@correo.com')
 ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
         <p><strong>3)</strong> Correo confirmado: Authentication → tu usuario → si pide confirmación, ábrelo desde el mail o desactiva “Confirm email” en Auth → Providers (solo desarrollo).</p>
+        <p><strong>4)</strong> Recuperar contraseña: en Supabase → Authentication → URL Configuration, añade tu URL del sitio (ej. <code>https://tudominio.com</code>) y la ruta exacta a <code>super-admin.html</code> en “Redirect URLs”, para que el enlace del correo funcione.</p>
       </div>
     </details>
+  </div>
+</div>
+
+<!-- Modal: solicitar enlace de recuperación -->
+<div class="modal-overlay" id="modal-recover-pw" onclick="if(event.target===this)closeModal('modal-recover-pw')">
+  <div class="modal" style="max-width:420px" onclick="event.stopPropagation()">
+    <div class="modal-hdr">
+      <div class="modal-title">📧 Recuperar contraseña</div>
+      <button type="button" class="modal-close" onclick="closeModal('modal-recover-pw')">×</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--gray);font-size:.86rem;margin-bottom:14px;line-height:1.45">Te enviaremos un enlace al correo. Ábrelo en este mismo navegador y podrás definir una clave nueva.</p>
+      <div class="fg-dark">
+        <label>Correo</label>
+        <input type="email" id="recover-email" placeholder="tu@correo.com" autocomplete="email">
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-wrap:wrap">
+      <button type="button" class="btn btn-secondary" onclick="closeModal('modal-recover-pw')">Cancelar</button>
+      <button type="button" class="btn btn-primary" onclick="sendPasswordRecoveryEmail()" id="btn-send-recover">Enviar enlace</button>
+    </div>
   </div>
 </div>
 
@@ -629,6 +672,74 @@ function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 /* ============================================================
    AUTH
    ============================================================ */
+function getSuperAdminRecoveryRedirectUrl() {
+  return new URL('super-admin.html', window.location.href).href.split('#')[0];
+}
+
+function openRecoverPasswordModal() {
+  if (!sb) {
+    const err = $('login-err');
+    err.textContent = 'Configura config.js con Supabase primero.';
+    err.style.display = 'block';
+    return;
+  }
+  $('recover-email').value = ($('sa-email').value || '').trim();
+  openModal('modal-recover-pw');
+}
+
+async function sendPasswordRecoveryEmail() {
+  if (!sb) return;
+  const email = ($('recover-email').value || '').trim().toLowerCase();
+  if (!email) {
+    showToast('Escribí tu correo.', 'error');
+    return;
+  }
+  const btn = $('btn-send-recover');
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = 'Enviando…';
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: getSuperAdminRecoveryRedirectUrl()
+    });
+    if (error) throw error;
+    showToast('Revisá tu correo (y carpeta spam) para el enlace de recuperación.');
+    closeModal('modal-recover-pw');
+  } catch (e) {
+    AppLog.error('resetPasswordForEmail', e);
+    showToast(e.message || 'No se pudo enviar el correo', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+}
+
+async function completePasswordRecovery() {
+  if (!sb) return;
+  const p1 = $('sa-new-pw1').value;
+  const p2 = $('sa-new-pw2').value;
+  if (!p1 || p1.length < 6) {
+    showToast('La contraseña debe tener al menos 6 caracteres.', 'error');
+    return;
+  }
+  if (p1 !== p2) {
+    showToast('Las contraseñas no coinciden.', 'error');
+    return;
+  }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if (error) {
+    showToast(error.message, 'error');
+    return;
+  }
+  await sb.auth.signOut();
+  $('login-form-recovery').style.display = 'none';
+  $('login-form-normal').style.display = 'block';
+  $('sa-new-pw1').value = '';
+  $('sa-new-pw2').value = '';
+  $('sa-pw').value = '';
+  showToast('Contraseña actualizada. Iniciá sesión con la nueva clave.');
+}
+
 function mapAuthErrorMessage(error) {
   if (!error || !error.message) return 'Error de acceso';
   const m = error.message;
@@ -739,12 +850,23 @@ async function doSuperLogout(){
   await sb.auth.signOut();
   $('app').style.display = 'none';
   $('login-screen').style.display = 'flex';
+  $('login-form-normal').style.display = 'block';
+  $('login-form-recovery').style.display = 'none';
   $('sa-pw').value = '';
 }
 
 if (sb) {
   sb.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT' || !session){
+    if (event === 'PASSWORD_RECOVERY') {
+      $('app').style.display = 'none';
+      $('login-screen').style.display = 'flex';
+      $('login-form-normal').style.display = 'none';
+      $('login-form-recovery').style.display = 'block';
+      const le = $('login-err');
+      if (le) { le.style.display = 'none'; le.textContent = ''; le.innerHTML = ''; }
+      return;
+    }
+    if (event === 'SIGNED_OUT' || !session) {
       $('app').style.display = 'none';
       $('login-screen').style.display = 'flex';
     }

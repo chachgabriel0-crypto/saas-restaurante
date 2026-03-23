@@ -69,6 +69,8 @@ body{font-family:var(--font-body);background:var(--g50);color:var(--g800);min-he
 .login-error .login-err-title{margin:0 0 8px;font-weight:700}
 .login-error .login-err-text{margin:0 0 12px;color:var(--g600);font-size:.86rem}
 .login-error .login-err-hint{margin:12px 0 0;font-size:.76rem;color:var(--g400)}
+.btn-forgot-pos{margin-top:12px;width:100%;padding:0;border:none;background:none;color:var(--mint-dark);font-size:.84rem;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px;font-family:inherit}
+.btn-forgot-pos:hover{color:var(--mint)}
 #lock-warning{background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:var(--r-sm);padding:10px 14px;margin-bottom:12px;font-size:.85rem;display:none}
 
 /* ============================================================
@@ -354,6 +356,7 @@ textarea{resize:vertical;min-height:78px}
       <strong>SaaS no configurado.</strong> Crea <code style="background:rgba(0,0,0,.06);padding:2px 6px;border-radius:4px">config.js</code> con la URL y la clave <em>anon</em> de Supabase (copia <code>config.example.js</code>).
     </div>
     <div class="login-error" id="login-error"></div>
+    <div id="login-form-normal-pos">
     <div class="form-group">
       <label id="login-user-label">Correo electrónico</label>
       <input type="email" id="login-user" placeholder="tu@restaurante.com" autocomplete="email">
@@ -367,6 +370,20 @@ textarea{resize:vertical;min-height:78px}
     </div>
     <div id="attempts-indicator" style="font-size:.8rem;color:#c53030;margin-bottom:10px;display:none"></div>
     <button class="btn btn-primary btn-full" onclick="doLogin()">🔐 Ingresar</button>
+    <button type="button" class="btn-forgot-pos" onclick="openPosRecoverPasswordModal()">¿Olvidaste tu contraseña?</button>
+    </div>
+    <div id="login-form-recovery-pos" style="display:none">
+      <p style="color:var(--g600);font-size:.88rem;margin-bottom:14px;line-height:1.45">Definí una contraseña nueva para tu cuenta.</p>
+      <div class="form-group">
+        <label>Nueva contraseña</label>
+        <input type="password" id="pos-new-pw1" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>Confirmar</label>
+        <input type="password" id="pos-new-pw2" placeholder="Repite la contraseña" autocomplete="new-password">
+      </div>
+      <button type="button" class="btn btn-primary btn-full" onclick="completePosPasswordRecovery()">Guardar nueva contraseña</button>
+    </div>
       <p style="text-align:center;color:var(--g400);font-size:.75rem;margin-top:18px">
     <span id="login-footer-hint">🔒 Cifrado seguro · Sesión protegida · v3.3</span>
   </p>
@@ -425,6 +442,25 @@ textarea{resize:vertical;min-height:78px}
 <div class="modal-overlay" id="modal-user"><div class="modal" id="modal-user-inner"></div></div>
 <div class="modal-overlay" id="modal-worker"><div class="modal" id="modal-worker-inner"></div></div>
 <div class="modal-overlay" id="modal-cashcut"><div class="modal" id="modal-cashcut-inner"></div></div>
+<div class="modal-overlay" id="modal-recover-pw-pos" onclick="if(event.target===this)closeModal('modal-recover-pw-pos')">
+  <div class="modal" style="max-width:420px" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 class="modal-title">📧 Recuperar contraseña</h3>
+      <button type="button" class="modal-close" onclick="closeModal('modal-recover-pw-pos')">×</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--g600);font-size:.88rem;margin-bottom:14px">Te enviaremos un enlace al correo. Ábrelo en este dispositivo para crear una clave nueva.</p>
+      <div class="form-group">
+        <label>Correo</label>
+        <input type="email" id="recover-email-pos" placeholder="tu@correo.com" autocomplete="email">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="closeModal('modal-recover-pw-pos')">Cancelar</button>
+      <button type="button" class="btn btn-primary" onclick="sendPosPasswordRecoveryEmail()" id="btn-send-recover-pos">Enviar enlace</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="modal-changelog">
   <div class="modal" style="max-width:500px">
     <div class="modal-header"><h3 class="modal-title">📋 Historial de Cambios</h3><button class="modal-close" onclick="closeModal('modal-changelog')">×</button></div>
@@ -706,6 +742,7 @@ let _saveQueued = false;
 let sb = null;
 let empresaId = null;
 let posCloudChannel = null;
+let _posRecoveryListenerRegistered = false;
 
 function initCloudClient() {
   const cfg = window.RESTAURANTE_CONFIG || {};
@@ -721,6 +758,114 @@ function initCloudClient() {
     ErrorHandler.log('initCloudClient', e);
     sb = null;
   }
+  if (sb && !_posRecoveryListenerRegistered) {
+    _posRecoveryListenerRegistered = true;
+    sb.auth.onAuthStateChange((event) => {
+      if (event !== 'PASSWORD_RECOVERY') return;
+      showPosPasswordRecoveryLoginUI();
+    });
+  }
+}
+
+function posUrlIndicatesPasswordRecovery() {
+  const h = (window.location.hash || '').replace(/^#/, '');
+  if (!h) return false;
+  try {
+    return new URLSearchParams(h).get('type') === 'recovery';
+  } catch (_) {
+    return /(^|&)type=recovery(&|$)/.test(h);
+  }
+}
+
+function showPosPasswordRecoveryLoginUI() {
+  const app = document.getElementById('app');
+  const login = document.getElementById('login-screen');
+  const norm = document.getElementById('login-form-normal-pos');
+  const rec = document.getElementById('login-form-recovery-pos');
+  if (app) app.style.display = 'none';
+  if (login) login.style.display = 'flex';
+  if (norm) norm.style.display = 'none';
+  if (rec) rec.style.display = 'block';
+  const el = document.getElementById('login-error');
+  if (el) { el.style.display = 'none'; el.textContent = ''; el.innerHTML = ''; }
+}
+
+function getPosRecoveryRedirectUrl() {
+  return new URL('index.html', window.location.href).href.split('#')[0];
+}
+
+function resetPosLoginFormsToNormal() {
+  const norm = document.getElementById('login-form-normal-pos');
+  const rec = document.getElementById('login-form-recovery-pos');
+  if (norm) norm.style.display = 'block';
+  if (rec) rec.style.display = 'none';
+  const p1 = document.getElementById('pos-new-pw1');
+  const p2 = document.getElementById('pos-new-pw2');
+  if (p1) p1.value = '';
+  if (p2) p2.value = '';
+}
+
+function openPosRecoverPasswordModal() {
+  if (!sb) {
+    showLoginError('Configura config.js con la URL y la clave anon de Supabase.', { durationMs: 6000 });
+    return;
+  }
+  const lu = document.getElementById('login-user');
+  const re = document.getElementById('recover-email-pos');
+  if (re) re.value = (lu && lu.value ? lu.value : '').trim();
+  openModal('modal-recover-pw-pos');
+}
+
+async function sendPosPasswordRecoveryEmail() {
+  if (!sb) return;
+  const inp = document.getElementById('recover-email-pos');
+  const email = (inp && inp.value ? inp.value : '').trim().toLowerCase();
+  if (!email) {
+    showToast('Escribí tu correo.', 3500);
+    return;
+  }
+  const btn = document.getElementById('btn-send-recover-pos');
+  const prev = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: getPosRecoveryRedirectUrl()
+    });
+    if (error) throw error;
+    showToast('Revisá tu correo (y spam) para el enlace de recuperación.', 5000);
+    closeModal('modal-recover-pw-pos');
+  } catch (e) {
+    ErrorHandler.log('resetPasswordForEmail', e);
+    showToast((e && e.message) ? e.message : 'No se pudo enviar el correo', 5000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prev || 'Enviar enlace'; }
+  }
+}
+
+async function completePosPasswordRecovery() {
+  if (!sb) return;
+  const p1El = document.getElementById('pos-new-pw1');
+  const p2El = document.getElementById('pos-new-pw2');
+  const p1 = p1El ? p1El.value : '';
+  const p2 = p2El ? p2El.value : '';
+  if (!p1 || p1.length < 6) {
+    showToast('La contraseña debe tener al menos 6 caracteres.', 4000);
+    return;
+  }
+  if (p1 !== p2) {
+    showToast('Las contraseñas no coinciden.', 4000);
+    return;
+  }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if (error) {
+    showToast(error.message, 5000);
+    return;
+  }
+  try { await sb.auth.signOut(); } catch (_) {}
+  resetPosLoginFormsToNormal();
+  const lpw = document.getElementById('login-pw');
+  if (lpw) lpw.value = '';
+  showToast('Contraseña actualizada. Iniciá sesión con la nueva clave.', 6000);
 }
 
 function applySaaSLoginUI() {
@@ -1153,6 +1298,7 @@ async function doLogout() {
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-pw').value = '';
   const lu = document.getElementById('login-user'); if(lu) lu.value = '';
+  resetPosLoginFormsToNormal();
   initLogin();
   applySaaSLoginUI();
 }
@@ -3217,11 +3363,15 @@ setInterval(() => { if(currentUser) saveDB(); }, 30000);
    ============================================================ */
 window.addEventListener('load', async () => {
   try {
+    const posRecoveryLaunch = posUrlIndicatesPasswordRecovery();
     await Database.openIDB();
     initCloudClient();
     applySaaSLoginUI();
     await loadDB();
-    if (await tryRestoreCloudSession()) {
+    if (posRecoveryLaunch) {
+      showPosPasswordRecoveryLoginUI();
+      initLogin();
+    } else if (await tryRestoreCloudSession()) {
       startInactivityTimer();
       showApp();
     } else {
