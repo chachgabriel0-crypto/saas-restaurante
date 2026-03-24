@@ -2,7 +2,10 @@
   "version": 2,
   "name": "restaurante-pos",
   "rewrites": [
-    { "source": "/((?!api/.*).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/|super-admin\\.html|.*\\.(?:js|css|png|jpg|jpeg|gif|svg|ico|json|webmanifest|woff2?|html)$).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
