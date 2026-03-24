@@ -338,7 +338,7 @@ textarea{resize:vertical;min-height:78px}
 .integrity-ok{color:#22c55e}.integrity-fail{color:var(--coral)}
 </style>
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 
@@ -541,12 +541,17 @@ const Security = (() => {
 })();
 
 /* ============================================================
-   MODULE: DATABASE (IndexedDB + localStorage fallback)
+   MODULE: DATABASE
+   false = 100% nube: datos en memoria + snapshot Supabase (sin IndexedDB/localStorage)
+   true  = caché local adicional (mismo navegador, respaldo si falla la red)
    ============================================================ */
+const USE_INDEXEDDB_CACHE = false;
+
 const Database = (() => {
   let idb = null;
 
   async function openIDB() {
+    if (!USE_INDEXEDDB_CACHE) return null;
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, 1);
       req.onupgradeneeded = e => {
@@ -558,6 +563,7 @@ const Database = (() => {
   }
 
   async function idbGet(key) {
+    if (!USE_INDEXEDDB_CACHE) return undefined;
     if (!idb) await openIDB();
     return new Promise((resolve, reject) => {
       const tx = idb.transaction(DB_STORE, 'readonly');
@@ -568,6 +574,7 @@ const Database = (() => {
   }
 
   async function idbSet(key, value) {
+    if (!USE_INDEXEDDB_CACHE) return;
     if (!idb) await openIDB();
     return new Promise((resolve, reject) => {
       const tx = idb.transaction(DB_STORE, 'readwrite');
@@ -578,13 +585,13 @@ const Database = (() => {
   }
 
   async function load() {
+    if (!USE_INDEXEDDB_CACHE) return null;
     try {
       const data = await idbGet(DB_KEY);
       if (data) return data;
     } catch (e) {
       ErrorHandler.log('IDB load failed, using localStorage', e);
     }
-    // Fallback to localStorage
     try {
       const raw = localStorage.getItem(LS_FALLBACK_KEY);
       if (raw) return JSON.parse(raw);
@@ -595,6 +602,7 @@ const Database = (() => {
   }
 
   async function save(data) {
+    if (!USE_INDEXEDDB_CACHE) return;
     try {
       await idbSet(DB_KEY, data);
     } catch (e) {
@@ -748,10 +756,10 @@ function initCloudClient() {
   const cfg = window.RESTAURANTE_CONFIG || {};
   const url = String(cfg.supabaseUrl || '').trim();
   const key = String(cfg.supabaseAnonKey || '').trim();
-  if (!url || !key || typeof window.supabase === 'undefined') return;
+  const lib = typeof window !== 'undefined' ? window.supabase : null;
+  if (!url || !key || !lib || typeof lib.createClient !== 'function') return;
   try {
-    const { createClient } = window.supabase;
-    sb = createClient(url, key, {
+    sb = lib.createClient(url, key, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
     });
   } catch (e) {
@@ -832,11 +840,12 @@ async function sendPosPasswordRecoveryEmail() {
       redirectTo: getPosRecoveryRedirectUrl()
     });
     if (error) throw error;
-    showToast('Revisá tu correo (y spam) para el enlace de recuperación.', 5000);
+    showToast('Si ese correo está en el sistema, Supabase enviará el enlace (revisá spam). En proyecto gratis los correos a veces tardan; en Supabase → Auth → SMTP configurá un proveedor propio para entrega fiable.', 8000);
     closeModal('modal-recover-pw-pos');
   } catch (e) {
     ErrorHandler.log('resetPasswordForEmail', e);
-    showToast((e && e.message) ? e.message : 'No se pudo enviar el correo', 5000);
+    const msg = (e && e.message) ? e.message : 'No se pudo enviar';
+    showToast(msg + ' · Comprueba Redirect URLs (index.html) y Site URL en Supabase → Auth.', 7000);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = prev || 'Enviar enlace'; }
   }

@@ -401,9 +401,15 @@ ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
       <div class="section-hdr">
         <div>
           <div class="section-title">Usuarios del Sistema</div>
-          <div class="section-sub">Gestiona los usuarios y sus roles</div>
+          <div class="section-sub">Cada usuario vive en <strong>Authentication</strong>; <code>profiles.empresa_id</code> define su restaurante (aislamiento por RLS, una sola base Supabase).</div>
         </div>
-        <button class="btn btn-secondary" onclick="loadUsuarios()">🔄 Actualizar</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="openModalGuiaAltaUsuario()">📋 Cómo dar de alta</button>
+          <button class="btn btn-secondary" onclick="loadUsuarios()">🔄 Actualizar</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px;padding:14px 18px;font-size:.82rem;color:var(--gray);line-height:1.5">
+        <strong style="color:var(--white)">Si no ves el correo en la tabla</strong>, ejecutá en SQL Editor el archivo <code>supabase-super-admin-user-tools.sql</code> del proyecto. Sin eso, el panel no puede leer emails de Auth ni reenviar restablecer contraseña desde aquí.
       </div>
       <div class="card" style="overflow:auto">
         <table class="data-table" id="tabla-usuarios">
@@ -492,9 +498,10 @@ ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
           <label>Vencimiento (dejar en blanco = sin límite)</label>
           <input type="date" id="e-vencimiento">
         </div>
-        <div class="fg-dark">
-          <label>Email de contacto</label>
-          <input type="email" id="e-email" placeholder="admin@empresa.com">
+        <div class="fg-dark" style="grid-column:1/-1">
+          <label>Email de contacto (opcional)</label>
+          <input type="email" id="e-email" placeholder="info@restaurante.com">
+          <div style="font-size:.72rem;color:var(--gray);margin-top:6px">Solo datos del negocio. <strong>No</strong> crea cuentas del POS; eso es Authentication → Users y luego pestaña Usuarios.</div>
         </div>
         <div class="fg-dark" style="grid-column:1/-1">
           <label>Teléfono</label>
@@ -571,6 +578,58 @@ ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-editar')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarEmpresa()" id="btn-guardar-empresa">💾 Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: guía alta usuario POS -->
+<div class="modal-overlay" id="modal-guia-alta" onclick="if(event.target===this)closeModal('modal-guia-alta')">
+  <div class="modal" style="max-width:520px" onclick="event.stopPropagation()">
+    <div class="modal-hdr">
+      <div class="modal-title">📋 Alta de usuario para un restaurante</div>
+      <button type="button" class="modal-close" onclick="closeModal('modal-guia-alta')">×</button>
+    </div>
+    <div class="modal-body" style="font-size:.86rem;color:var(--gray);line-height:1.55">
+      <p><strong style="color:var(--white)">No hay una base por empresa:</strong> todos comparten el mismo proyecto Supabase; lo que aísla datos es <code>empresa_id</code> en cada fila y las políticas RLS.</p>
+      <ol style="margin:12px 0 0 18px;padding:0">
+        <li style="margin-bottom:8px">Creá la empresa en <strong>Empresas → Nueva empresa</strong>.</li>
+        <li style="margin-bottom:8px">En <strong>Supabase → Authentication → Users</strong>: <em>Invite</em> o <em>Add user</em> con el correo del empleado/admin del local.</li>
+        <li style="margin-bottom:8px">Al crearse el usuario, el trigger rellena <code>profiles</code>. Volvé a <strong>Usuarios</strong> en este panel y pulsá <strong>Empresa</strong> para asignar restaurante y rol (staff / empresa_admin).</li>
+        <li style="margin-bottom:8px">Si el correo de invitación o de <strong>restablecer contraseña</strong> no llega: revisá spam; en <strong>Auth → SMTP</strong> configurá Resend/SendGrid/etc.; y en <strong>URL Configuration</strong> incluí la URL de tu <code>index.html</code> en Redirect URLs.</li>
+      </ol>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-primary" onclick="closeModal('modal-guia-alta')">Entendido</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: asignar empresa a usuario -->
+<div class="modal-overlay" id="modal-asignar-empresa" onclick="if(event.target===this)closeModal('modal-asignar-empresa')">
+  <div class="modal" style="max-width:440px" onclick="event.stopPropagation()">
+    <div class="modal-hdr">
+      <div class="modal-title">🏢 Asignar restaurante</div>
+      <button type="button" class="modal-close" onclick="closeModal('modal-asignar-empresa')">×</button>
+    </div>
+    <div class="modal-body">
+      <p id="ae-email-label" style="font-size:.85rem;color:var(--gray);margin-bottom:14px"></p>
+      <input type="hidden" id="ae-user-id">
+      <div class="fg-dark">
+        <label>Empresa</label>
+        <select id="ae-empresa"></select>
+      </div>
+      <div class="fg-dark">
+        <label>Rol en el POS</label>
+        <select id="ae-rol">
+          <option value="staff">staff (caja / mesas)</option>
+          <option value="empresa_admin">empresa_admin (configura su local)</option>
+        </select>
+      </div>
+      <div id="ae-alert" class="alert" style="display:none;margin-top:10px"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="closeModal('modal-asignar-empresa')">Cancelar</button>
+      <button type="button" class="btn btn-primary" onclick="guardarAsignarEmpresa()" id="btn-ae-guardar">Guardar</button>
     </div>
   </div>
 </div>
@@ -691,6 +750,11 @@ function getSuperAdminRecoveryRedirectUrl() {
   return new URL('super-admin.html', window.location.href).href.split('#')[0];
 }
 
+/** Enlace del correo de recuperación para usuarios del POS (mismo dominio que este panel). */
+function getPosPublicUrlForRecovery() {
+  return new URL('index.html', window.location.href).href.split('#')[0];
+}
+
 function openRecoverPasswordModal() {
   if (!sb) {
     const err = $('login-err');
@@ -718,11 +782,11 @@ async function sendPasswordRecoveryEmail() {
       redirectTo: getSuperAdminRecoveryRedirectUrl()
     });
     if (error) throw error;
-    showToast('Revisá tu correo (y carpeta spam) para el enlace de recuperación.');
+    showToast('Si el correo está registrado, Supabase envía el enlace (revisá spam). Para entrega fiable: Supabase → Project Settings → Auth → SMTP.');
     closeModal('modal-recover-pw');
   } catch (e) {
     AppLog.error('resetPasswordForEmail', e);
-    showToast(e.message || 'No se pudo enviar el correo', 'error');
+    showToast((e.message || 'No se pudo enviar') + ' · Revisa Redirect URLs y Site URL en Auth.', 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = prev;
@@ -1192,30 +1256,157 @@ async function renovar30(id){
 /* ============================================================
    USUARIOS
    ============================================================ */
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+
+function openModalGuiaAltaUsuario() {
+  openModal('modal-guia-alta');
+}
+
+async function enviarResetAlStaff(email) {
+  if (!sb || !email) return;
+  const ok = confirm('¿Enviar correo de restablecer contraseña a ' + email + '? (redirect al POS index.html)');
+  if (!ok) return;
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(String(email).trim().toLowerCase(), {
+      redirectTo: getPosPublicUrlForRecovery()
+    });
+    if (error) throw error;
+    showToast('Listo. Si el correo existe en Auth, revisá bandeja y spam. SMTP propio en Supabase mejora la entrega.');
+  } catch (e) {
+    AppLog.error('reset staff', e);
+    showToast((e.message || 'Error') + ' · Redirect URLs debe incluir tu index.html', 'error');
+  }
+}
+
+/** Rellena al cargar usuarios (evita onclick roto con emails raros). */
+let _usuariosRowById = {};
+
+function openModalAsignarEmpresaById(uid) {
+  const p = _usuariosRowById[uid];
+  if (!p) return;
+  openModalAsignarEmpresa(p.profile_id, p.email || '', p.empresa_id, p.role);
+}
+
+function enviarResetAlStaffById(uid) {
+  const p = _usuariosRowById[uid];
+  if (!p || !p.email) return;
+  enviarResetAlStaff(p.email);
+}
+
+function openModalAsignarEmpresa(uid, email, empresaIdActual, rolActual) {
+  if (rolActual === 'super_admin') {
+    showToast('Super admin no lleva empresa en el POS.', 'error');
+    return;
+  }
+  if (!empresasCache || empresasCache.length === 0) {
+    showToast('Cargá la lista de empresas (pestaña Empresas) y volvé.', 'error');
+    return;
+  }
+  $('ae-user-id').value = uid;
+  $('ae-email-label').innerHTML = '<strong>' + escHtml(email || uid) + '</strong>';
+  const sel = $('ae-empresa');
+  sel.innerHTML = empresasCache.map(e =>
+    '<option value="' + e.id + '"' + (e.id === empresaIdActual ? ' selected' : '') + '>' + escHtml(e.nombre) + '</option>'
+  ).join('');
+  $('ae-rol').value = rolActual === 'empresa_admin' ? 'empresa_admin' : 'staff';
+  $('ae-alert').style.display = 'none';
+  $('ae-alert').textContent = '';
+  openModal('modal-asignar-empresa');
+}
+
+async function guardarAsignarEmpresa() {
+  if (!sb) return;
+  const uid = $('ae-user-id').value;
+  const eid = $('ae-empresa').value;
+  const rol = $('ae-rol').value;
+  const alertEl = $('ae-alert');
+  if (!eid) {
+    alertEl.style.display = 'block';
+    alertEl.textContent = 'Elegí una empresa.';
+    return;
+  }
+  const btn = $('btn-ae-guardar');
+  btn.disabled = true;
+  try {
+    const { error } = await sb.rpc('super_admin_assign_empresa', {
+      p_user_id: uid,
+      p_empresa_id: eid,
+      p_role: rol
+    });
+    if (error) throw error;
+    showToast('✅ Restaurante y rol guardados');
+    closeModal('modal-asignar-empresa');
+    loadUsuarios();
+  } catch (e) {
+    alertEl.style.display = 'block';
+    alertEl.textContent = (e.message || e) + ' · ¿Ejecutaste supabase-super-admin-user-tools.sql?';
+    AppLog.error('guardarAsignarEmpresa', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function loadUsuarios(){
   if (!sb) return;
   $('usuarios-tbody').innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px"><span class="loading"></span></td></tr>`;
 
-  const { data: perfiles, error } = await sb.from('profiles')
-    .select('id, role, nombre_visible, activo, empresa_id, created_at, empresas(nombre)');
-
-  if (error){
-    AppLog.error('loadUsuarios', error.message);
-    $('usuarios-tbody').innerHTML = `<tr><td colspan="6">Error: ${error.message}</td></tr>`;
-    return;
+  if (!empresasCache || empresasCache.length === 0) {
+    try { await loadEmpresas(); } catch (e) { AppLog.warn('prefetch empresas', e); }
   }
 
-  const rows = (perfiles||[]).map(p => {
+  const rpc = await sb.rpc('super_admin_list_users_with_email');
+  let list = [];
+
+  if (rpc.error) {
+    AppLog.warn('super_admin_list_users_with_email', rpc.error.message);
+    const { data: perfiles, error } = await sb.from('profiles')
+      .select('id, role, nombre_visible, activo, empresa_id, created_at, empresas(nombre)');
+    if (error) {
+      AppLog.error('loadUsuarios', error.message);
+      $('usuarios-tbody').innerHTML = `<tr><td colspan="6">Error: ${escHtml(error.message)}</td></tr>`;
+      return;
+    }
+    list = (perfiles || []).map(p => ({
+      profile_id: p.id,
+      email: null,
+      role: p.role,
+      nombre_visible: p.nombre_visible,
+      activo: p.activo,
+      empresa_id: p.empresa_id,
+      empresa_nombre: p.empresas?.nombre,
+      created_at: p.created_at
+    }));
+  } else {
+    list = rpc.data || [];
+  }
+
+  _usuariosRowById = {};
+  list.forEach(p => { _usuariosRowById[p.profile_id] = p; });
+
+  const rows = list.map(p => {
     const rolBadge = p.role === 'super_admin' ? 'badge-purple' : p.role === 'empresa_admin' ? 'badge-blue' : 'badge-green';
-    const empresa  = p.empresas?.nombre || '—';
+    const empresa = p.empresa_nombre || '—';
+    const emailHtml = p.email
+      ? escHtml(p.email)
+      : '<span style="opacity:.55;font-size:.78rem">Sin RPC · ejecutá SQL user-tools</span>';
+    const resetBtn = p.email
+      ? `<button type="button" class="btn btn-sm btn-secondary" onclick="enviarResetAlStaffById('${p.profile_id}')">📧 Reset</button>`
+      : '';
+    const empBtn = p.role !== 'super_admin'
+      ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openModalAsignarEmpresaById('${p.profile_id}')">🏢 Empresa</button>`
+      : '';
     return `<tr>
-      <td>${p.nombre_visible || p.id}</td>
-      <td>${empresa}</td>
+      <td>${emailHtml}<div style="font-size:.72rem;opacity:.65;margin-top:3px">${escHtml(p.nombre_visible || '')}</div></td>
+      <td>${escHtml(empresa)}</td>
       <td><span class="badge ${rolBadge}">${p.role}</span></td>
       <td><span class="badge ${p.activo ? 'badge-green' : 'badge-red'}">${p.activo ? 'Activo' : 'Inactivo'}</span></td>
       <td>${fmtDate(p.created_at)}</td>
-      <td>
-        <button class="btn btn-sm btn-secondary" onclick="cambiarRol('${p.id}','${p.role}')">Rol</button>
+      <td style="white-space:nowrap;display:flex;flex-wrap:wrap;gap:6px">
+        ${empBtn}
+        <button type="button" class="btn btn-sm btn-secondary" onclick="cambiarRol('${p.profile_id}','${p.role}')">Rol</button>
+        ${resetBtn}
       </td>
     </tr>`;
   });
