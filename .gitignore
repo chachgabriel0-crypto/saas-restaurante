@@ -1,3 +1,4 @@
-config.js
+# config.js: súbelo con el proyecto para que Vercel/Git funcione sin pasos extra.
+# Si el repo es público en GitHub, no subas claves: usa repo privado o borra config.js del commit.
 .env
 .env.local
