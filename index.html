@@ -483,7 +483,7 @@ textarea{resize:vertical;min-height:78px}
    ============================================================ */
 const APP_VERSION      = '3.3.0';
 const LOGO_B64 = './logo.png';
-const SCHEMA_VERSION   = 5;
+const SCHEMA_VERSION   = 6;
 const DB_NAME          = 'RestaurantePOS_v1_2026';
 const DB_STORE         = 'appdata';
 const DB_KEY           = 'main';
@@ -720,6 +720,52 @@ function getProductPrice(id, date) {
 function getCategory(id) { return DB.menu.categories.find(c=>c.id===id); }
 function getTable(id)    { return DB.tables.find(t=>t.id===id); }
 function getOrder(id)    { return DB.orders.find(o=>o.id===id); }
+/** Marca de edición para resolver conflictos entre dispositivos (JSON snapshot). */
+function orderCloudTime(o) {
+  if (!o) return 0;
+  const t = o.cloudModifiedAt || o.updatedAt || o.createdAt;
+  if (!t) return 0;
+  const n = new Date(t).getTime();
+  return Number.isFinite(n) ? n : 0;
+}
+function touchOrderCloud(order) {
+  if (!order) return;
+  order.cloudModifiedAt = new Date().toISOString();
+}
+/** Al traer datos del servidor: unir órdenes y no borrar activas locales si el snapshot es más viejo que la orden. */
+function mergeOrdersForLoad(localArr, remoteArr, serverMs) {
+  const sm = serverMs || 0;
+  const remoteById = new Map((remoteArr || []).filter(Boolean).map(o => [o.id, o]));
+  const localById = new Map((localArr || []).filter(Boolean).map(o => [o.id, o]));
+  const ids = new Set([...localById.keys(), ...remoteById.keys()]);
+  const out = [];
+  for (const id of ids) {
+    const L = localById.get(id);
+    const R = remoteById.get(id);
+    if (L && R) {
+      out.push(orderCloudTime(L) >= orderCloudTime(R) ? { ...L } : { ...R });
+    } else if (R && !L) {
+      out.push({ ...R });
+    } else if (L && !R) {
+      const terminal = ['paid', 'cancelled'].includes(L.status);
+      const lt = orderCloudTime(L);
+      if (!terminal && sm >= lt) continue;
+      out.push({ ...L });
+    }
+  }
+  return out;
+}
+/** Antes de subir: unir con lo que ya hay en el servidor para no pisar órdenes de otro equipo. */
+function mergeOrdersForPush(localArr, remoteArr) {
+  const byId = new Map();
+  (remoteArr || []).filter(Boolean).forEach(o => { if (o.id) byId.set(o.id, { ...o }); });
+  (localArr || []).filter(Boolean).forEach(o => {
+    if (!o.id) return;
+    const cur = byId.get(o.id);
+    if (!cur || orderCloudTime(o) >= orderCloudTime(cur)) byId.set(o.id, { ...o });
+  });
+  return Array.from(byId.values());
+}
 function tableOrders(tid){ return DB.orders.filter(o=>o.tableId===tid && o.status!=='paid' && o.status!=='cancelled'); }
 function tableTotal(tid) { return tableOrders(tid).reduce((s,o)=>s+orderTotal(o),0); }
 function orderTotal(ord) { return ord.items.reduce((s,i)=>s+(i.qty*i.price),0); }
@@ -914,28 +960,36 @@ async function loadCloudSnapshotIntoDB(opts) {
     return { ok: true, changed: false };
   }
   const incomingTs = data.updated_at || null;
-  if (!force && incomingTs && incomingTs === _lastPosWorkspaceUpdatedAt) {
-    return { ok: true, changed: false };
-  }
+  const serverMs = incomingTs ? new Date(incomingTs).getTime() : 0;
+  const snapshotBefore = JSON.stringify(DB);
+  const localOrders = (DB && Array.isArray(DB.orders)) ? DB.orders.slice() : [];
+  const remoteDB = migrateData(JSON.parse(JSON.stringify(data.payload)));
+  DB = { ...remoteDB, orders: mergeOrdersForLoad(localOrders, remoteDB.orders, serverMs) };
   _lastPosWorkspaceUpdatedAt = incomingTs;
-  DB = migrateData(JSON.parse(JSON.stringify(data.payload)));
   verifyIntegrity();
   try { await Database.save(DB); } catch (e) { ErrorHandler.log('cache after cloud load', e); }
-  return { ok: true, changed: true };
+  const changed = snapshotBefore !== JSON.stringify(DB);
+  return { ok: true, changed };
 }
 
 async function pushCloudSnapshot() {
   if (!sb || !empresaId || !currentUser || !currentUser.cloud) return;
   try {
-    const payload = JSON.parse(JSON.stringify(DB));
+    const { data: row, error: fe } = await sb.from('pos_workspace_state').select('payload, updated_at').eq('empresa_id', empresaId).maybeSingle();
+    if (fe) throw fe;
+    let outgoing = JSON.parse(JSON.stringify(DB));
+    if (row && row.payload && Array.isArray(row.payload.orders)) {
+      outgoing.orders = mergeOrdersForPush(DB.orders, row.payload.orders);
+    }
     const ts = new Date().toISOString();
     const { error } = await sb.from('pos_workspace_state').upsert({
       empresa_id: empresaId,
-      payload,
+      payload: outgoing,
       updated_at: ts,
       updated_by: currentUser.id
     }, { onConflict: 'empresa_id' });
     if (error) throw error;
+    DB.orders = outgoing.orders;
     _lastPosWorkspaceUpdatedAt = ts;
   } catch (e) {
     ErrorHandler.log('pushCloudSnapshot', e);
@@ -957,7 +1011,7 @@ function stopCloudSyncPolling() {
   }
 }
 
-/** Cada 45s trae snapshot si Realtime no dispara (tabla no publicada / red). */
+/** Cada 12s trae snapshot si Realtime no dispara (tabla no publicada / red). */
 function startCloudSyncPolling() {
   stopCloudSyncPolling();
   if (!currentUser || !currentUser.cloud || !sb || !empresaId) return;
@@ -972,7 +1026,7 @@ function startCloudSyncPolling() {
     } catch (e) {
       ErrorHandler.log('cloud poll', e);
     }
-  }, 45000);
+  }, 12000);
 }
 
 function subscribePosRealtime() {
@@ -1235,6 +1289,14 @@ function migrateData(data) {
       (data.users || []).forEach(u => { u.passwordHash = u.passwordHash || ''; });
       v = 5;
     }
+    if (v < 6) {
+      (data.orders || []).forEach(o => {
+        if (o && !o.cloudModifiedAt) {
+          o.cloudModifiedAt = o.updatedAt || o.createdAt || new Date().toISOString();
+        }
+      });
+      v = 6;
+    }
     data.schemaVersion = SCHEMA_VERSION;
     data.appVersion = APP_VERSION;
     // Ensure default admin always exists
@@ -1481,6 +1543,19 @@ function navigateTo(page) {
   const nb = document.getElementById('nav-'+page); if(nb) nb.classList.add('active');
   renderPage(page);
   closeMobileSidebars();
+  if (page === 'ordenes' && currentUser && currentUser.cloud && sb && empresaId) {
+    void (async () => {
+      try {
+        const r = await loadCloudSnapshotIntoDB();
+        if (r.changed) {
+          buildSidebar();
+          if (currentPage === 'ordenes') renderOrdenes();
+        }
+      } catch (e) {
+        ErrorHandler.log('nav ordenes cloud pull', e);
+      }
+    })();
+  }
 }
 
 function toggleSidebarMesas() {
@@ -1708,7 +1783,8 @@ async function confirmOrder(tableId) {
   const order = {
     id:uid(), tableId, clientName, notes,
     items:orderDraft.items.map(i=>({...i, itemStatus:'pending'})),
-    status:'pending', createdBy:currentUser.id, createdAt:now()
+    status:'pending', createdBy:currentUser.id, createdAt:now(),
+    cloudModifiedAt: new Date().toISOString()
   };
   DB.orders.push(order);
   AuditLog.append('ORDER_CREATED', {orderId:order.id, tableId, items:order.items.length, createdBy:currentUser.username});
@@ -1723,7 +1799,7 @@ async function confirmOrder(tableId) {
 function editOrderNotes(orderId) {
   const order = getOrder(orderId); if(!order) return;
   const note = prompt('Notas de la orden:', order.notes||'');
-  if (note !== null) { order.notes = note; saveDB(); openTable(order.tableId); }
+  if (note !== null) { order.notes = note; touchOrderCloud(order); saveDB(); openTable(order.tableId); }
 }
 
 async function cancelOrderFromTable(orderId, tableId) {
@@ -1732,6 +1808,7 @@ async function cancelOrderFromTable(orderId, tableId) {
   if (reason === null) return;
   if (!reason.trim()) { alert('Debes ingresar un motivo'); return; }
   DB.deletedRecords.orders.push({...order, deletedAt:now(), deletedBy:currentUser.id, reason:reason.trim(), action:'cancelled'});
+  touchOrderCloud(order);
   order.status = 'cancelled';
   AuditLog.append('ORDER_CANCELLED', {orderId, reason:reason.trim(), cancelledBy:currentUser.username});
   await saveDB();
@@ -1745,6 +1822,7 @@ async function cancelOrderFromBoard(orderId) {
   if (reason===null) return;
   if (!reason.trim()) { alert('Debes ingresar un motivo'); return; }
   DB.deletedRecords.orders.push({...order, deletedAt:now(), deletedBy:currentUser.id, reason:reason.trim(), action:'cancelled'});
+  touchOrderCloud(order);
   order.status = 'cancelled';
   AuditLog.append('ORDER_CANCELLED', {orderId, reason:reason.trim(), cancelledBy:currentUser.username});
   await saveDB();
@@ -1763,6 +1841,7 @@ async function removeClient(tableId, clientName) {
   const reason = prompt(`Motivo para remover a ${clientName}:`, '');
   if (reason === null) return; // usuario canceló el prompt
   DB.orders.filter(o=>o.tableId===tableId&&o.clientName===clientName).forEach(o=>{
+    touchOrderCloud(o);
     DB.deletedRecords.clients.push({
       clientName, tableId, orderId: o.id,
       removedAt: now(), removedBy: currentUser.id, reason,
@@ -1884,7 +1963,7 @@ async function processCharge(tableId) {
     else if (method==='credit') {
       DB.credits.push({id:uid(),saleId,clientName:clientLabel||'Cliente',amount:total,paid:false,payments:[],date:now()});
     }
-    ordersToCharge.forEach(o=>{ o.status='paid'; });
+    ordersToCharge.forEach(o => { touchOrderCloud(o); o.status = 'paid'; });
     addJournalEntry('Venta', method, total, saleId);
     AuditLog.append('SALE_PROCESSED', {saleId, tableId, total, method, createdBy:currentUser.username, clientName:clientLabel});
     await saveDB();
@@ -2365,7 +2444,9 @@ function moveOrder(orderId, newStatus) {
   const order = getOrder(orderId); if(!order) return;
   const itemStatus = {pending:'pending',cooking:'cooking',ready:'ready',delivered:'ready'}[newStatus]||newStatus;
   order.items = order.items.map(i=>({...i, itemStatus: newStatus==='delivered'?'ready':itemStatus}));
-  order.status = newStatus; saveDB(); renderOrdenes();
+  order.status = newStatus;
+  touchOrderCloud(order);
+  saveDB(); renderOrdenes();
 }
 
 function moveItemStatus(orderId, itemId, newItemStatus) {
@@ -2373,6 +2454,7 @@ function moveItemStatus(orderId, itemId, newItemStatus) {
   const item = order.items.find(i=>i.id===itemId); if(!item) return;
   item.itemStatus = newItemStatus;
   recalcOrderStatus(order);
+  touchOrderCloud(order);
   saveDB(); renderOrdenes();
 }
 
@@ -2380,6 +2462,7 @@ function markAllItems(orderId, newItemStatus) {
   const order = getOrder(orderId); if(!order) return;
   order.items = order.items.map(i=>({...i, itemStatus:newItemStatus}));
   recalcOrderStatus(order);
+  touchOrderCloud(order);
   saveDB(); renderOrdenes();
 }
 
