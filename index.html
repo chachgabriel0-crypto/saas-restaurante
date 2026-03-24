@@ -751,6 +751,10 @@ let sb = null;
 let empresaId = null;
 let posCloudChannel = null;
 let _posRecoveryListenerRegistered = false;
+/** Evita volver a fusionar el mismo snapshot; push actualiza este valor. */
+let _lastPosWorkspaceUpdatedAt = null;
+/** Sondeo si Realtime no está publicado o falla el canal. */
+let _cloudSyncPollTimer = null;
 
 function initCloudClient() {
   const cfg = window.RESTAURANTE_CONFIG || {};
@@ -894,31 +898,45 @@ function applySaaSLoginUI() {
   if (miss) miss.style.display = sb ? 'none' : 'block';
 }
 
-async function loadCloudSnapshotIntoDB() {
-  if (!sb || !empresaId) return;
+/**
+ * @param {{ force?: boolean }} [opts] force=true ignora deduplicación por updated_at (botón Actualizar).
+ * @returns {{ ok: boolean, changed: boolean, error?: string }}
+ */
+async function loadCloudSnapshotIntoDB(opts) {
+  const force = !!(opts && opts.force);
+  if (!sb || !empresaId) return { ok: false, changed: false, error: 'sin sesión nube' };
   const { data, error } = await sb.from('pos_workspace_state').select('payload, updated_at').eq('empresa_id', empresaId).maybeSingle();
   if (error) {
     ErrorHandler.log('loadCloudSnapshot', error);
-    return;
+    return { ok: false, changed: false, error: error.message };
   }
-  if (data && data.payload && typeof data.payload === 'object') {
-    DB = migrateData(JSON.parse(JSON.stringify(data.payload)));
-    verifyIntegrity();
-    try { await Database.save(DB); } catch (e) { ErrorHandler.log('cache after cloud load', e); }
+  if (!data || !data.payload || typeof data.payload !== 'object') {
+    return { ok: true, changed: false };
   }
+  const incomingTs = data.updated_at || null;
+  if (!force && incomingTs && incomingTs === _lastPosWorkspaceUpdatedAt) {
+    return { ok: true, changed: false };
+  }
+  _lastPosWorkspaceUpdatedAt = incomingTs;
+  DB = migrateData(JSON.parse(JSON.stringify(data.payload)));
+  verifyIntegrity();
+  try { await Database.save(DB); } catch (e) { ErrorHandler.log('cache after cloud load', e); }
+  return { ok: true, changed: true };
 }
 
 async function pushCloudSnapshot() {
   if (!sb || !empresaId || !currentUser || !currentUser.cloud) return;
   try {
     const payload = JSON.parse(JSON.stringify(DB));
+    const ts = new Date().toISOString();
     const { error } = await sb.from('pos_workspace_state').upsert({
       empresa_id: empresaId,
       payload,
-      updated_at: new Date().toISOString(),
+      updated_at: ts,
       updated_by: currentUser.id
     }, { onConflict: 'empresa_id' });
     if (error) throw error;
+    _lastPosWorkspaceUpdatedAt = ts;
   } catch (e) {
     ErrorHandler.log('pushCloudSnapshot', e);
     showToast('⚠️ No se pudo guardar en la nube. Revisa conexión o tabla pos_workspace_state.', 4000);
@@ -932,20 +950,52 @@ function unsubscribePosRealtime() {
   }
 }
 
+function stopCloudSyncPolling() {
+  if (_cloudSyncPollTimer) {
+    clearInterval(_cloudSyncPollTimer);
+    _cloudSyncPollTimer = null;
+  }
+}
+
+/** Cada 45s trae snapshot si Realtime no dispara (tabla no publicada / red). */
+function startCloudSyncPolling() {
+  stopCloudSyncPolling();
+  if (!currentUser || !currentUser.cloud || !sb || !empresaId) return;
+  _cloudSyncPollTimer = setInterval(async () => {
+    if (!currentUser || !currentUser.cloud || !sb || !empresaId) return;
+    try {
+      const r = await loadCloudSnapshotIntoDB();
+      if (r.changed) {
+        buildSidebar();
+        if (typeof renderPage === 'function' && typeof currentPage !== 'undefined') renderPage(currentPage);
+      }
+    } catch (e) {
+      ErrorHandler.log('cloud poll', e);
+    }
+  }, 45000);
+}
+
 function subscribePosRealtime() {
   if (!sb || !empresaId || !currentUser || !currentUser.cloud) return;
   unsubscribePosRealtime();
   const filter = 'empresa_id=eq.' + empresaId;
-  posCloudChannel = sb.channel('pos-workspace-' + empresaId)
+  const chName = 'pos-workspace-' + empresaId + '-' + Math.random().toString(36).slice(2, 9);
+  posCloudChannel = sb.channel(chName)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_workspace_state', filter }, async () => {
-      await loadCloudSnapshotIntoDB();
+      const r = await loadCloudSnapshotIntoDB();
+      if (!r.changed) return;
       try {
         buildSidebar();
         if (typeof renderPage === 'function' && typeof currentPage !== 'undefined') renderPage(currentPage);
       } catch (_) {}
-      showToast('🔁 Datos actualizados desde la nube', 2500);
+      showToast('🔁 Sincronizado desde la nube', 2200);
     })
-    .subscribe();
+    .subscribe((status, err) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        ErrorHandler.log('Realtime canal POS', err || status);
+      }
+    });
+  startCloudSyncPolling();
 }
 
 async function tryRestoreCloudSession() {
@@ -1291,6 +1341,8 @@ function showLoginError(msg, opts) {
 
 async function doLogout() {
   unsubscribePosRealtime();
+  stopCloudSyncPolling();
+  _lastPosWorkspaceUpdatedAt = null;
   if (currentUser) {
     AuditLog.append('LOGOUT', { username: currentUser.username, cloud: !!currentUser.cloud });
     await saveDB();
@@ -2202,6 +2254,34 @@ function shareReceiptPDF() {
 /* ============================================================
    MODULE: ÓRDENES / KITCHEN BOARD
    ============================================================ */
+async function refreshOrdenesFromCloud() {
+  const page = document.getElementById('page-ordenes');
+  const btn = page && page.querySelector('.btn-refresh-cloud');
+  if (!currentUser || !currentUser.cloud || !sb || !empresaId) {
+    showToast('⚠️ Iniciá sesión en modo nube para sincronizar entre dispositivos.', 3500);
+    renderOrdenes();
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳…';
+  }
+  try {
+    const r = await loadCloudSnapshotIntoDB({ force: true });
+    buildSidebar();
+    if (typeof renderPage === 'function' && typeof currentPage !== 'undefined') renderPage(currentPage);
+    if (r.ok) {
+      showToast(r.changed ? '✅ Sincronizado con la nube' : '✔️ Ya tenías la última versión', 2600);
+    } else {
+      showToast('⚠️ No se pudo leer la nube: ' + (r.error || 'error'), 5000);
+    }
+  } catch (e) {
+    ErrorHandler.log('refreshOrdenesFromCloud', e);
+    showToast('⚠️ Error de red al sincronizar', 4000);
+    renderOrdenes();
+  }
+}
+
 function renderOrdenes() {
   const page = document.getElementById('page-ordenes');
   const active = DB.orders.filter(o=>!['paid','cancelled'].includes(o.status));
@@ -2220,7 +2300,7 @@ function renderOrdenes() {
   page.innerHTML = `
     <div class="page-header">
       <div><h1 class="page-title">Órdenes</h1><p class="page-subtitle">Tablero de cocina — estado por platillo</p></div>
-      <button class="btn btn-secondary btn-sm" onclick="renderOrdenes()">🔄 Actualizar</button>
+      <button type="button" class="btn btn-secondary btn-sm btn-refresh-cloud" onclick="refreshOrdenesFromCloud()">🔄 Actualizar</button>
     </div>
     <div class="kitchen-board">
       ${Object.entries(cols).map(([status,col])=>`
