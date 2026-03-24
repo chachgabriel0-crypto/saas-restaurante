@@ -4,12 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#1a0a2e">
+<meta name="robots" content="noindex, nofollow">
 <title>Super Admin — Restaurante POS SaaS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="./vendor/supabase.umd.js"></script>
 <style>
 /* ============================================================
    DESIGN TOKENS — SUPER ADMIN DARK THEME
@@ -1087,7 +1088,7 @@ async function loadEmpresas(){
   const { data, error } = await query;
   if (error){
     AppLog.error('loadEmpresas', error.message);
-    $('empresas-list').innerHTML = `<div class="empty">Error: ${error.message}</div>`;
+    $('empresas-list').innerHTML = `<div class="empty">Error: ${escHtml(error.message)}</div>`;
     return;
   }
   empresasCache = data || [];
@@ -1440,7 +1441,7 @@ async function loadAuditoria(){
 
   if (error){
     AppLog.error('loadAuditoria', error.message);
-    $('audit-tbody').innerHTML = `<tr><td colspan="5">Error: ${error.message}</td></tr>`;
+    $('audit-tbody').innerHTML = `<tr><td colspan="5">Error: ${escHtml(error.message)}</td></tr>`;
     return;
   }
 
