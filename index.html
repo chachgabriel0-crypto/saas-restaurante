@@ -336,6 +336,8 @@ textarea{resize:vertical;min-height:78px}
 .dark-toggle:hover{background:rgba(255,255,255,.15)}
 /* Integrity status */
 .integrity-ok{color:#22c55e}.integrity-fail{color:var(--coral)}
+.btn-link-login-mode{background:none;border:none;color:var(--mint-dark);text-decoration:underline;cursor:pointer;font-size:.8rem;padding:0;font-family:inherit}
+.btn-link-login-mode:hover{color:var(--navy)}
 </style>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -357,9 +359,14 @@ textarea{resize:vertical;min-height:78px}
     </div>
     <div class="login-error" id="login-error"></div>
     <div id="login-form-normal-pos">
+    <div class="form-group" id="login-codigo-row">
+      <label for="login-codigo">Código del restaurante</label>
+      <input type="text" id="login-codigo" placeholder="Ej: rbs (te lo da el administrador)" autocomplete="organization" autocapitalize="characters" spellcheck="false">
+      <div style="font-size:.72rem;color:var(--g400);margin-top:6px;line-height:1.35">Es el código corto de tu empresa en el panel admin (suele ser las iniciales). Así el mismo nombre de usuario no choca entre locales.</div>
+    </div>
     <div class="form-group">
-      <label id="login-user-label">Correo electrónico</label>
-      <input type="email" id="login-user" placeholder="tu@restaurante.com" autocomplete="email">
+      <label id="login-user-label">Usuario</label>
+      <input type="text" id="login-user" placeholder="Ej: maria o tu correo" autocomplete="username">
     </div>
     <div class="form-group">
       <label>Contraseña</label>
@@ -371,6 +378,8 @@ textarea{resize:vertical;min-height:78px}
     <div id="attempts-indicator" style="font-size:.8rem;color:#c53030;margin-bottom:10px;display:none"></div>
     <button class="btn btn-primary btn-full" onclick="doLogin()">🔐 Ingresar</button>
     <button type="button" class="btn-forgot-pos" onclick="openPosRecoverPasswordModal()">¿Olvidaste tu contraseña?</button>
+    <p id="login-recover-hint-pos" style="display:none;font-size:.72rem;color:var(--g400);margin:10px 0 0;line-height:1.4">Con código + usuario no hay correo real: pedile al administrador que restablezca tu clave en Supabase → Authentication → Users, o que use “Restablecer” desde el panel Super Admin si aplica.</p>
+    <p style="text-align:center;margin-top:12px"><button type="button" class="btn-link-login-mode" id="btn-toggle-login-mode" onclick="togglePosLoginMode()">Entrar con correo electrónico</button></p>
     </div>
     <div id="login-form-recovery-pos" style="display:none">
       <p style="color:var(--g600);font-size:.88rem;margin-bottom:14px;line-height:1.45">Definí una contraseña nueva para tu cuenta.</p>
@@ -490,6 +499,9 @@ const DB_KEY           = 'main';
 // Clave propia: cada app tiene su IndexedDB / localStorage aunque abras otro index en la misma carpeta u origen
 const LS_FALLBACK_KEY  = 'RestaurantePOS_fallback_v1_2026';
 const SESSION_KEY      = 'restaurante_session_v1_2026';
+/** Dominio técnico para cuentas POS sin correo real (único en Auth: código.usuario@dominio). */
+const POS_LOGIN_EMAIL_DOMAIN = 'pos-login.invalid';
+const POS_LOGIN_USE_EMAIL_KEY = 'pos_login_use_email';
 const MAX_FAIL_ATTEMPTS= 5;
 const LOCK_MINUTES     = 15;
 const INACTIVITY_MS    = 10 * 60 * 1000; // 10 min
@@ -927,19 +939,68 @@ async function completePosPasswordRecovery() {
   showToast('Contraseña actualizada. Iniciá sesión con la nueva clave.', 6000);
 }
 
-function applySaaSLoginUI() {
+function sanitizePosLoginPart(s) {
+  return String(s || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function buildPosSyntheticEmail(codigo, usuario) {
+  const c = sanitizePosLoginPart(codigo);
+  const u = sanitizePosLoginPart(usuario);
+  if (!c || !u) return null;
+  return c + '.' + u + '@' + POS_LOGIN_EMAIL_DOMAIN;
+}
+function posLoginUsesEmailMode() {
+  return sessionStorage.getItem(POS_LOGIN_USE_EMAIL_KEY) === '1';
+}
+function posDisplayNameFromAuthEmail(authEmail, fallbackInput, emailMode) {
+  const e = String(authEmail || '').toLowerCase();
+  if (emailMode) {
+    const local = (fallbackInput || e.split('@')[0] || '').trim();
+    return local.slice(0, 80) || 'usuario';
+  }
+  const suf = '@' + POS_LOGIN_EMAIL_DOMAIN;
+  if (e.endsWith(suf)) {
+    const local = e.slice(0, -suf.length);
+    const dot = local.indexOf('.');
+    if (dot >= 0) return (local.slice(dot + 1) || local).slice(0, 80);
+  }
+  return (fallbackInput || e.split('@')[0] || 'usuario').slice(0, 80);
+}
+function applyPosLoginModeUI() {
+  const emailMode = posLoginUsesEmailMode();
+  const row = document.getElementById('login-codigo-row');
   const lbl = document.getElementById('login-user-label');
   const inp = document.getElementById('login-user');
+  const btn = document.getElementById('btn-toggle-login-mode');
+  const rh = document.getElementById('login-recover-hint-pos');
+  if (row) row.style.display = emailMode ? 'none' : 'block';
+  if (lbl) lbl.textContent = emailMode ? 'Correo electrónico' : 'Usuario';
+  if (inp) {
+    inp.type = emailMode ? 'email' : 'text';
+    inp.placeholder = emailMode ? 'tu@restaurante.com' : 'Ej: cajero1';
+    inp.autocomplete = emailMode ? 'email' : 'username';
+  }
+  if (btn) btn.textContent = emailMode ? 'Entrar con código de restaurante + usuario' : 'Entrar con correo electrónico';
+  if (rh) rh.style.display = emailMode ? 'none' : 'block';
+}
+function togglePosLoginMode() {
+  const next = posLoginUsesEmailMode() ? '0' : '1';
+  sessionStorage.setItem(POS_LOGIN_USE_EMAIL_KEY, next);
+  applyPosLoginModeUI();
+  const cod = document.getElementById('login-codigo');
+  const u = document.getElementById('login-user');
+  if (u) u.value = '';
+  if (cod) cod.value = '';
+  try {
+    if (next === '1') u.focus();
+    else { if (cod) cod.focus(); else u.focus(); }
+  } catch (_) {}
+}
+function applySaaSLoginUI() {
   const foot = document.getElementById('login-footer-hint');
   const miss = document.getElementById('login-config-missing');
-  if (lbl) lbl.textContent = 'Correo electrónico';
-  if (inp) {
-    inp.type = 'email';
-    inp.placeholder = 'tu@restaurante.com';
-    inp.autocomplete = 'email';
-  }
+  applyPosLoginModeUI();
   if (foot) {
-    foot.textContent = '☁️ SaaS profesional · Supabase · Licencia por empresa · Misma cuenta en todos los equipos';
+    foot.textContent = '☁️ SaaS profesional · Supabase · Código por restaurante + usuario (o correo) · Misma cuenta en todos los equipos';
   }
   if (miss) miss.style.display = sb ? 'none' : 'block';
 }
@@ -1011,13 +1072,15 @@ function stopCloudSyncPolling() {
   }
 }
 
-/** Cada 12s trae snapshot si Realtime no dispara (tabla no publicada / red). */
+/** Cada 5s: valida licencia/cuenta/empresa y trae snapshot si Realtime no dispara. */
 function startCloudSyncPolling() {
   stopCloudSyncPolling();
   if (!currentUser || !currentUser.cloud || !sb || !empresaId) return;
   _cloudSyncPollTimer = setInterval(async () => {
     if (!currentUser || !currentUser.cloud || !sb || !empresaId) return;
     try {
+      const stillOk = await revalidatePosCloudEntitlementOrLogout({ toast: true });
+      if (!stillOk) return;
       const r = await loadCloudSnapshotIntoDB();
       if (r.changed) {
         buildSidebar();
@@ -1026,7 +1089,7 @@ function startCloudSyncPolling() {
     } catch (e) {
       ErrorHandler.log('cloud poll', e);
     }
-  }, 12000);
+  }, 5000);
 }
 
 function subscribePosRealtime() {
@@ -1052,28 +1115,100 @@ function subscribePosRealtime() {
   startCloudSyncPolling();
 }
 
+const POS_ENTITLEMENT_SELECT = 'id, role, nombre_visible, empresa_id, activo, empresas(estado, fecha_vencimiento)';
+
+function evaluatePosEntitlement(row) {
+  if (!row) return { ok: false, message: 'No se encontró tu perfil en la base de datos.' };
+  const roleStr = String(row.role || '');
+  if (roleStr === 'super_admin') return { ok: false, code: 'super_admin' };
+  if (row.activo !== true) {
+    return { ok: false, message: 'Tu cuenta está desactivada. Un administrador debe reactivarla antes de que puedas operar el POS.' };
+  }
+  if (!row.empresa_id) {
+    return { ok: false, message: 'Tu usuario no tiene restaurante asignado. Pedí que te vinculen a una empresa en el panel de administración.' };
+  }
+  const rawEmp = row.empresas;
+  const emp = Array.isArray(rawEmp) ? rawEmp[0] : rawEmp;
+  if (!emp || typeof emp !== 'object') {
+    return { ok: false, message: 'No se pudo verificar el estado del restaurante.' };
+  }
+  if (emp.estado !== 'activa') {
+    return { ok: false, message: 'Este restaurante está suspendido. No podés usar el POS hasta que un administrador reactive la empresa.' };
+  }
+  if (emp.fecha_vencimiento) {
+    const v = String(emp.fecha_vencimiento).slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    if (v < today) {
+      return { ok: false, message: 'La licencia del restaurante venció. Renová el plan para volver a operar.' };
+    }
+  }
+  return { ok: true };
+}
+
+async function fetchPosProfileEntitlement(userId) {
+  if (!sb || !userId) return { data: null, error: { message: 'sin cliente' } };
+  return sb.from('profiles').select(POS_ENTITLEMENT_SELECT).eq('id', userId).maybeSingle();
+}
+
+/**
+ * Comprueba perfil + empresa activa + licencia. Si falla y toast=true, avisa y cierra sesión.
+ * @returns {Promise<boolean>} true si sigue autorizado
+ */
+async function revalidatePosCloudEntitlementOrLogout(opts) {
+  const toast = !!(opts && opts.toast);
+  if (!sb || !currentUser || !currentUser.cloud) return true;
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session || !session.user) {
+      if (toast) showToast('Tu sesión expiró. Volvé a iniciar sesión.', 6000);
+      await doLogout();
+      return false;
+    }
+    const { data: row, error } = await fetchPosProfileEntitlement(session.user.id);
+    if (error || !row) {
+      if (toast) showToast('No se pudo validar tu acceso. Volvé a iniciar sesión.', 6000);
+      await sb.auth.signOut().catch(() => {});
+      await doLogout();
+      return false;
+    }
+    const ent = evaluatePosEntitlement(row);
+    if (ent.ok) {
+      if (row.empresa_id && empresaId && row.empresa_id !== empresaId) {
+        if (toast) showToast('Tu cuenta fue reasignada a otro restaurante. Iniciá sesión de nuevo.', 8000);
+        await sb.auth.signOut().catch(() => {});
+        await doLogout();
+        return false;
+      }
+      return true;
+    }
+    if (ent.code === 'super_admin') {
+      if (toast) showToast('Esta cuenta no puede usar el POS.', 6000);
+      await sb.auth.signOut().catch(() => {});
+      await doLogout();
+      return false;
+    }
+    if (toast) showToast(ent.message || 'Acceso no permitido.', 8000);
+    await sb.auth.signOut().catch(() => {});
+    await doLogout();
+    return false;
+  } catch (e) {
+    ErrorHandler.log('revalidatePosCloudEntitlementOrLogout', e);
+    return true;
+  }
+}
+
 async function tryRestoreCloudSession() {
   if (!sb) return false;
   try {
     const { data: { session }, error: sErr } = await sb.auth.getSession();
     if (sErr || !session) return false;
-    const { data: profile, error: pErr } = await sb.from('profiles')
-      .select('id, role, nombre_visible, empresa_id, activo')
-      .eq('id', session.user.id)
-      .maybeSingle();
+    const { data: profile, error: pErr } = await fetchPosProfileEntitlement(session.user.id);
     if (pErr || !profile) {
       await sb.auth.signOut();
       return false;
     }
-    if (String(profile.role || '') === 'super_admin') {
-      await sb.auth.signOut();
-      return false;
-    }
-    if (!profile.empresa_id) {
-      await sb.auth.signOut();
-      return false;
-    }
-    if (profile.activo === false) {
+    const ent = evaluatePosEntitlement(profile);
+    if (!ent.ok) {
       await sb.auth.signOut();
       return false;
     }
@@ -1097,10 +1232,20 @@ async function tryRestoreCloudSession() {
 
 async function doCloudLogin() {
   if (checkLock()) return;
-  const emailRaw = (document.getElementById('login-user')?.value || '').trim();
-  const email = emailRaw.toLowerCase();
+  const emailMode = posLoginUsesEmailMode();
+  const loginUserVal = (document.getElementById('login-user')?.value || '').trim();
+  const loginCodigoVal = (document.getElementById('login-codigo')?.value || '').trim();
+  let email;
+  if (emailMode) {
+    email = loginUserVal.toLowerCase();
+  } else {
+    email = buildPosSyntheticEmail(loginCodigoVal, loginUserVal);
+  }
   const pw = document.getElementById('login-pw').value;
-  if (!emailRaw) { showLoginError('Ingresa tu correo'); return; }
+  if (!email) {
+    showLoginError(emailMode ? 'Ingresa tu correo' : 'Ingresá el código del restaurante y el usuario (solo letras y números, sin espacios).');
+    return;
+  }
   if (!pw) { showLoginError('Ingresa tu contraseña'); return; }
   if (!sb) { showLoginError('Configura config.js con URL y clave anon de Supabase (modo SaaS).'); return; }
   try {
@@ -1130,17 +1275,14 @@ async function doCloudLogin() {
       showLoginError('No se obtuvo sesión. ¿Correo sin confirmar? Revisa Authentication en Supabase.');
       return;
     }
-    const { data: profile, error: pErr } = await sb.from('profiles')
-      .select('id, role, nombre_visible, empresa_id, activo')
-      .eq('id', session.user.id)
-      .maybeSingle();
+    const { data: profile, error: pErr } = await fetchPosProfileEntitlement(session.user.id);
     if (pErr || !profile) {
       await sb.auth.signOut();
       showLoginError('No se encontró tu perfil en la base de datos.');
       return;
     }
-    const roleStr = String(profile.role || '');
-    if (roleStr === 'super_admin') {
+    const ent = evaluatePosEntitlement(profile);
+    if (ent.code === 'super_admin') {
       await sb.auth.signOut();
       showLoginError('', {
         html: '<p class="login-err-title">Cuenta reconocida: super administrador</p>' +
@@ -1151,22 +1293,18 @@ async function doCloudLogin() {
       });
       return;
     }
-    if (!profile.empresa_id) {
+    if (!ent.ok) {
       await sb.auth.signOut();
-      showLoginError('Tu usuario no tiene restaurante asignado. En Supabase → profiles pon empresa_id o pide a un super admin que te vincule a una empresa.');
-      return;
-    }
-    if (profile.activo === false) {
-      await sb.auth.signOut();
-      showLoginError('Tu cuenta está desactivada.');
+      showLoginError(ent.message || 'No podés acceder al POS con esta cuenta.');
       return;
     }
     failedAttempts = 0;
     document.getElementById('attempts-indicator').style.display = 'none';
     empresaId = profile.empresa_id;
+    const nm = profile.nombre_visible && String(profile.nombre_visible).trim();
     currentUser = {
       id: profile.id,
-      username: profile.nombre_visible || emailRaw.split('@')[0],
+      username: nm || posDisplayNameFromAuthEmail(session.user.email, loginUserVal, emailMode),
       role: profile.role === 'empresa_admin' ? 'admin' : 'seller',
       cloud: true
     };
@@ -1421,6 +1559,7 @@ async function doLogout() {
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-pw').value = '';
   const lu = document.getElementById('login-user'); if(lu) lu.value = '';
+  const lc = document.getElementById('login-codigo'); if(lc) lc.value = '';
   resetPosLoginFormsToNormal();
   initLogin();
   applySaaSLoginUI();
@@ -1489,10 +1628,17 @@ function applyDarkMode() {
    MODULE: APP INIT
    ============================================================ */
 function initLogin() {
+  const cod = document.getElementById('login-codigo');
   const up = document.getElementById('login-user');
   const pp = document.getElementById('login-pw');
-  if (up) { up.addEventListener('keydown', e => e.key==='Enter' && pp.focus()); up.focus(); }
+  applyPosLoginModeUI();
+  if (cod && !posLoginUsesEmailMode()) {
+    cod.addEventListener('keydown', e => { if (e.key === 'Enter') up && up.focus(); });
+  }
+  if (up) { up.addEventListener('keydown', e => e.key==='Enter' && pp && pp.focus()); }
   if (pp)   pp.addEventListener('keydown', e => e.key==='Enter' && doLogin());
+  if (posLoginUsesEmailMode()) { if (up) up.focus(); }
+  else { if (cod) cod.focus(); else if (up) up.focus(); }
 }
 
 function showApp() {
@@ -1546,6 +1692,8 @@ function navigateTo(page) {
   if (page === 'ordenes' && currentUser && currentUser.cloud && sb && empresaId) {
     void (async () => {
       try {
+        const ok = await revalidatePosCloudEntitlementOrLogout({ toast: true });
+        if (!ok) return;
         const r = await loadCloudSnapshotIntoDB();
         if (r.changed) {
           buildSidebar();

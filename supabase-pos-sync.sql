@@ -23,6 +23,16 @@ CREATE POLICY "pos_workspace_super_admin"
   ON public.pos_workspace_state FOR ALL TO authenticated
   USING (public.is_super_admin()) WITH CHECK (public.is_super_admin());
 
--- Realtime (recomendado para ver cambios al instante entre dispositivos):
--- Dashboard → Database → Publications → supabase_realtime → incluir public.pos_workspace_state
--- o Database → Replication según tu versión de Supabase.
+-- Realtime (cambios al instante entre cocina, caja y móviles):
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'pos_workspace_state'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.pos_workspace_state;
+  END IF;
+END $$;
+-- Si tu proyecto no tiene publicación supabase_realtime, Dashboard → Database → Publications.
