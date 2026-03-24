@@ -409,13 +409,13 @@ ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px;padding:14px 18px;font-size:.82rem;color:var(--gray);line-height:1.5">
-        <strong style="color:var(--white)">Login sin correo real:</strong> cada empresa tiene un <strong>código POS</strong> (pestaña Empresas). En Authentication el “correo” técnico es <code>código.usuario@pos-login.invalid</code>; en la pantalla del POS solo escriben código + usuario. Si no ves el correo en la tabla, ejecutá <code>supabase-super-admin-user-tools.sql</code> y <code>supabase-pos-login-codigo.sql</code>.
+        <strong style="color:var(--white)">Flujo profesional:</strong> cada usuario se crea en <strong>Authentication</strong> con su <strong>correo real</strong>. Acá lo vinculás al restaurante con <strong>Empresa</strong>; el POS solo pide correo y contraseña. Si no ves el email en la tabla, ejecutá <code>supabase-super-admin-user-tools.sql</code>.
       </div>
       <div class="card" style="overflow:auto">
         <table class="data-table" id="tabla-usuarios">
           <thead>
             <tr>
-              <th>Email / POS</th>
+              <th>Email</th>
               <th>Empresa</th>
               <th>Rol</th>
               <th>Estado</th>
@@ -472,12 +472,7 @@ ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
       <div class="form-grid">
         <div class="fg-dark" style="grid-column:1/-1">
           <label>Nombre de la empresa *</label>
-          <input type="text" id="e-nombre" placeholder="Ej: Restaurante El Buen Sabor" onblur="suggestEmpresaCodigoIfEmpty()">
-        </div>
-        <div class="fg-dark">
-          <label>Código POS <span style="opacity:.65;font-weight:400">(corto, único)</span></label>
-          <input type="text" id="e-codigo" placeholder="Ej: rbs" maxlength="12" autocomplete="off" spellcheck="false" autocapitalize="characters">
-          <div style="font-size:.72rem;color:var(--gray);margin-top:6px">Lo escriben en el POS junto al usuario. Se sugiere al salir del nombre; podés cambiarlo.</div>
+          <input type="text" id="e-nombre" placeholder="Ej: Restaurante El Buen Sabor">
         </div>
         <div class="fg-dark">
           <label>Plan</label>
@@ -543,11 +538,6 @@ ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
           <label>Nombre *</label>
           <input type="text" id="ee-nombre">
         </div>
-        <div class="fg-dark" style="grid-column:1/-1">
-          <label>Código POS</label>
-          <input type="text" id="ee-codigo" placeholder="rbs" maxlength="12" autocomplete="off" spellcheck="false" autocapitalize="characters">
-          <div style="font-size:.72rem;color:var(--gray);margin-top:6px">En Supabase Auth el correo del empleado será <code style="font-size:.68rem">código.usuario@pos-login.invalid</code></div>
-        </div>
         <div class="fg-dark">
           <label>Estado</label>
           <select id="ee-estado">
@@ -602,11 +592,11 @@ ON CONFLICT (id) DO UPDATE SET role='super_admin'::public.app_role;</pre>
     <div class="modal-body" style="font-size:.86rem;color:var(--gray);line-height:1.55">
       <p><strong style="color:var(--white)">No hay una base por empresa:</strong> todos comparten el mismo proyecto Supabase; lo que aísla datos es <code>empresa_id</code> en cada fila y las políticas RLS.</p>
       <ol style="margin:12px 0 0 18px;padding:0">
-        <li style="margin-bottom:8px">Creá la empresa en <strong>Empresas → Nueva empresa</strong> y revisá el <strong>código POS</strong> (único por restaurante).</li>
-        <li style="margin-bottom:8px">Ejecutá en SQL Editor <code>supabase-pos-login-codigo.sql</code> si aún no tenés la columna <code>codigo_acceso</code>.</li>
-        <li style="margin-bottom:8px">En <strong>Authentication → Users → Add user</strong>: email = <strong style="color:#c4b5fd">código.usuario@pos-login.invalid</strong> (ej. si el código es <code>rbs</code> y el cajero es <code>maria</code>: <code>rbs.maria@pos-login.invalid</code>). Contraseña la definís vos. <em>No</em> hace falta correo real; con <strong>Confirm email</strong> desactivado en Auth entra al toque.</li>
-        <li style="margin-bottom:8px">El trigger crea <code>profiles</code>. En <strong>Usuarios</strong> pulsá <strong>Empresa</strong>, asigná el restaurante y rol. Opcional: en Table Editor <code>profiles.nombre_visible</code> pon el nombre amigable (“María”).</li>
-        <li style="margin-bottom:8px">Restablecer contraseña por correo no aplica a estos emails técnicos: usá Auth → usuario → reset password en panel, o cambiá la clave desde Supabase.</li>
+        <li style="margin-bottom:8px">Creá la empresa en <strong>Empresas → Nueva empresa</strong>.</li>
+        <li style="margin-bottom:8px">En <strong>Supabase → Authentication → Users</strong>: <em>Add user</em> o <em>Invite</em> con el <strong>correo real</strong> del empleado o admin del local (el mismo que usará en el POS).</li>
+        <li style="margin-bottom:8px">Al crearse el usuario, el trigger rellena <code>profiles</code>. Volvé a <strong>Usuarios</strong> en este panel y pulsá <strong>Empresa</strong> para asignar restaurante y rol (staff / empresa_admin). Ahí queda vinculado a los datos de su empresa.</li>
+        <li style="margin-bottom:8px">Opcional: en Table Editor, <code>profiles.nombre_visible</code> para el nombre que verán en pantalla.</li>
+        <li style="margin-bottom:8px">Si no llega el correo de invitación o de <strong>restablecer contraseña</strong>: spam; <strong>Auth → SMTP</strong> con proveedor propio; y <strong>URL Configuration</strong> con la URL de tu <code>index.html</code> en Redirect URLs.</li>
       </ol>
     </div>
     <div class="modal-footer">
@@ -1060,7 +1050,7 @@ async function loadDashboard(){
   let recientes = [];
   try {
     const { data: r, error: re } = await sb.from('empresas')
-      .select('id,nombre,logo_url,plan,moneda,created_at,estado,fecha_vencimiento,codigo_acceso')
+      .select('id,nombre,logo_url,plan,moneda,created_at,estado,fecha_vencimiento')
       .order('created_at', { ascending: false })
       .limit(5);
     if (re) { AppLog.error('empresas recientes', re); showToast('Error al cargar empresas recientes', 'error'); }
@@ -1077,7 +1067,7 @@ async function loadDashboard(){
       <div style="font-size:1.3rem">${e.logo_url? `<img src="${e.logo_url}" style="width:36px;height:36px;border-radius:8px;object-fit:cover">` : '🏢'}</div>
       <div style="flex:1">
         <div style="font-weight:600;font-size:.88rem">${e.nombre}</div>
-        <div style="font-size:.73rem;color:var(--gray)">Creada ${fmtDate(e.created_at)} · ${planPill(e.plan||'basico')}${e.codigo_acceso ? ` · <strong style="color:#a7f3d0">POS ${escHtml(e.codigo_acceso)}</strong>` : ''}</div>
+        <div style="font-size:.73rem;color:var(--gray)">Creada ${fmtDate(e.created_at)} · ${planPill(e.plan||'basico')}</div>
       </div>
       <span class="badge ${er.cls}">${er.label}</span>
     </div>`;
@@ -1090,7 +1080,7 @@ async function loadDashboard(){
 async function loadEmpresas(){
   if (!sb) return;
   $('empresas-list').innerHTML = `<div class="empty"><span class="loading"></span></div>`;
-  let query = sb.from('empresas').select('id,nombre,logo_url,estado,plan,moneda,fecha_vencimiento,created_at,codigo_acceso').order('created_at',{ascending:false});
+  let query = sb.from('empresas').select('id,nombre,logo_url,estado,plan,moneda,fecha_vencimiento,created_at').order('created_at',{ascending:false});
   const filtro = $('filtro-estado').value;
   if (filtro) query = query.eq('estado', filtro);
 
@@ -1114,7 +1104,7 @@ async function loadEmpresas(){
       <div class="empresa-logo">${e.logo_url? `<img src="${e.logo_url}" alt="${e.nombre}">` : '🏢'}</div>
       <div class="empresa-info">
         <div class="empresa-name">${e.nombre}</div>
-        <div class="empresa-meta">${planPill(e.plan||'basico')} · Moneda: ${e.moneda||'Q'} · Vence: ${venc}${e.codigo_acceso ? ` · <span style="color:#a7f3d0;font-weight:600">POS ${escHtml(e.codigo_acceso)}</span>` : ' · <span style="opacity:.55;font-size:.78rem">Sin código POS (ejecutá SQL o editá empresa)</span>'}</div>
+        <div class="empresa-meta">${planPill(e.plan||'basico')} · Moneda: ${e.moneda||'Q'} · Vence: ${venc}</div>
         <div style="margin-top:5px"><span class="badge ${er.cls}">${er.label}</span></div>
       </div>
       <div class="empresa-actions">
@@ -1136,7 +1126,6 @@ function openModalNuevaEmpresa(){
   $('e-email').value = '';
   $('e-telefono').value = '';
   $('e-direccion').value = '';
-  if ($('e-codigo')) $('e-codigo').value = '';
   $('modal-alert').style.display = 'none';
   openModal('modal-empresa');
   setTimeout(() => $('e-nombre').focus(), 100);
@@ -1152,21 +1141,16 @@ async function crearEmpresa(){
   btn.disabled = true;
 
   try {
-  const codigoManual = $('e-codigo') ? $('e-codigo').value.trim() : '';
   const { data, error } = await sb.rpc('crear_empresa', {
     p_nombre:            nombre,
     p_moneda:            $('e-moneda').value,
     p_fecha_vencimiento: $('e-vencimiento').value || null,
-    p_plan:              $('e-plan').value,
-    p_codigo_acceso:     codigoManual || null
+    p_plan:              $('e-plan').value
   });
 
   if (error){
     AppLog.error('crear_empresa rpc', error.message);
-    const hint = /codigo|unique|duplicate|idx_empresas/i.test(error.message)
-      ? ' ¿Código POS duplicado? Cambiá el código o dejalo vacío para que se genere solo.'
-      : '';
-    showModalAlert('modal-alert', 'Error: ' + error.message + hint, 'error');
+    showModalAlert('modal-alert', 'Error: ' + error.message, 'error');
     btn.innerHTML = '✅ Crear empresa'; btn.disabled = false;
     return;
   }
@@ -1205,7 +1189,6 @@ function editarEmpresa(id){
   $('ee-moneda').value       = e.moneda || 'Q';
   $('ee-vencimiento').value  = e.fecha_vencimiento || '';
   $('ee-logo').value         = e.logo_url || '';
-  if ($('ee-codigo')) $('ee-codigo').value = e.codigo_acceso || '';
   $('modal-editar-alert').style.display = 'none';
   openModal('modal-editar');
 }
@@ -1220,20 +1203,13 @@ async function guardarEmpresa(){
   btn.innerHTML = '<span class="loading"></span> Guardando…'; btn.disabled = true;
 
   try {
-  const codNorm = $('ee-codigo') ? $('ee-codigo').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '') : '';
-  if ($('ee-codigo') && $('ee-codigo').value.trim() && !codNorm) {
-    showModalAlert('modal-editar-alert', 'Código POS: usá solo letras y números (sin espacios).', 'error');
-    btn.innerHTML = '💾 Guardar cambios'; btn.disabled = false;
-    return;
-  }
   const updates = {
     nombre,
     estado:            $('ee-estado').value,
     plan:              $('ee-plan').value,
     moneda:            $('ee-moneda').value,
     fecha_vencimiento: $('ee-vencimiento').value || null,
-    logo_url:          $('ee-logo').value || null,
-    codigo_acceso:     codNorm || null
+    logo_url:          $('ee-logo').value || null
   };
 
   const { error } = await sb.from('empresas').update(updates).eq('id', id);
@@ -1285,45 +1261,12 @@ function escHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 }
 
-const POS_LOGIN_EMAIL_DOMAIN = 'pos-login.invalid';
-
-function formatPosLoginFromEmail(email) {
-  const e = String(email || '').toLowerCase();
-  const suf = '@' + POS_LOGIN_EMAIL_DOMAIN;
-  if (!e.endsWith(suf)) return '';
-  const local = e.slice(0, -suf.length);
-  const dot = local.indexOf('.');
-  if (dot < 0) return 'Login POS: revisar formato de email';
-  return 'En el POS: código ' + local.slice(0, dot).toUpperCase() + ' · usuario ' + local.slice(dot + 1);
-}
-
-function suggestEmpresaCodigoFromNombre(nombre) {
-  const parts = String(nombre || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '';
-  const s = parts.map(w => {
-    const x = w.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    return x.replace(/[^a-zA-Z0-9]/g, '').charAt(0);
-  }).join('').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
-  return s || 'e';
-}
-
-function suggestEmpresaCodigoIfEmpty() {
-  const n = $('e-nombre');
-  const c = $('e-codigo');
-  if (!n || !c || c.value.trim()) return;
-  c.value = suggestEmpresaCodigoFromNombre(n.value);
-}
-
 function openModalGuiaAltaUsuario() {
   openModal('modal-guia-alta');
 }
 
 async function enviarResetAlStaff(email) {
   if (!sb || !email) return;
-  if (String(email).toLowerCase().endsWith('@' + POS_LOGIN_EMAIL_DOMAIN)) {
-    showToast('Este usuario entra con código+usuario POS; el correo técnico no recibe mails. Cambiá la contraseña en Supabase → Authentication → Users.', 'error');
-    return;
-  }
   const ok = confirm('¿Enviar correo de restablecer contraseña a ' + email + '? (redirect al POS index.html)');
   if (!ok) return;
   try {
@@ -1446,9 +1389,8 @@ async function loadUsuarios(){
   const rows = list.map(p => {
     const rolBadge = p.role === 'super_admin' ? 'badge-purple' : p.role === 'empresa_admin' ? 'badge-blue' : 'badge-green';
     const empresa = p.empresa_nombre || '—';
-    const posHint = p.email ? formatPosLoginFromEmail(p.email) : '';
     const emailHtml = p.email
-      ? escHtml(p.email) + (posHint ? `<div style="font-size:.72rem;color:#a7f3d0;margin-top:4px;line-height:1.35">${escHtml(posHint)}</div>` : '')
+      ? escHtml(p.email)
       : '<span style="opacity:.55;font-size:.78rem">Sin RPC · ejecutá SQL user-tools</span>';
     const resetBtn = p.email
       ? `<button type="button" class="btn btn-sm btn-secondary" onclick="enviarResetAlStaffById('${p.profile_id}')">📧 Reset</button>`

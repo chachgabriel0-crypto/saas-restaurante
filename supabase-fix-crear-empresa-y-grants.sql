@@ -1,12 +1,16 @@
 -- ============================================================
--- Código corto por empresa para login POS (sin correo real)
--- Ejecutar en Supabase → SQL Editor
+-- ARREGLO: crear empresa desde Super Admin + vincular usuarios
+-- Ejecutar UNA VEZ en Supabase → SQL Editor si fallaba:
+--   - "Crear empresa" (RPC crear_empresa)
+--   - Asignar restaurante (si faltaba columna activo en profiles, etc.)
 --
--- Supabase Auth sigue usando "email" internamente; el POS arma:
---   {codigo}.{usuario}@pos-login.invalid
--- El código es único por restaurante → no hay choque "maria" entre empresas.
+-- Causas típicas:
+--   1) Proyecto creado solo con supabase-super-admin.sql → faltan columnas
+--      plan/moneda en empresas y/o tablas mesas, categorias, config_empresa.
+--   2) Sin GRANT EXECUTE, PostgREST no deja llamar crear_empresa como usuario autenticado.
 -- ============================================================
 
+-- Empresas: columnas que el panel y la RPC esperan
 ALTER TABLE public.empresas ADD COLUMN IF NOT EXISTS plan text DEFAULT 'basico';
 ALTER TABLE public.empresas ADD COLUMN IF NOT EXISTS moneda text DEFAULT 'Q';
 ALTER TABLE public.empresas ADD COLUMN IF NOT EXISTS telefono text;
@@ -14,12 +18,10 @@ ALTER TABLE public.empresas ADD COLUMN IF NOT EXISTS direccion text;
 ALTER TABLE public.empresas ADD COLUMN IF NOT EXISTS email_contacto text;
 ALTER TABLE public.empresas ADD COLUMN IF NOT EXISTS codigo_acceso text;
 
-DROP INDEX IF EXISTS idx_empresas_codigo_acceso_lower;
-CREATE UNIQUE INDEX idx_empresas_codigo_acceso_lower
-  ON public.empresas (lower(trim(codigo_acceso)))
-  WHERE codigo_acceso IS NOT NULL AND btrim(codigo_acceso) <> '';
+-- Perfiles: el POS comprueba activo; en esquemas viejos puede faltar
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS activo boolean NOT NULL DEFAULT true;
 
--- RPC crear_empresa: compatible con BD mínima (solo empresas) o esquema completo
+-- RPC: crea la empresa siempre; solo rellena mesas/categorías/config si esas tablas existen
 CREATE OR REPLACE FUNCTION public.crear_empresa(
   p_nombre            text,
   p_moneda            text DEFAULT 'Q',
@@ -91,4 +93,5 @@ BEGIN
 END;
 $$;
 
+-- Permisos para que el Super Admin (rol authenticated) pueda invocar la RPC
 GRANT EXECUTE ON FUNCTION public.crear_empresa(text, text, date, text, text) TO authenticated;
