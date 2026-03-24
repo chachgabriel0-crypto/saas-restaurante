@@ -343,7 +343,7 @@ textarea{resize:vertical;min-height:78px}
 .integrity-ok{color:#22c55e}.integrity-fail{color:var(--coral)}
 </style>
 <script src="config.js"></script>
-<script src="./vendor/supabase.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 
@@ -494,7 +494,7 @@ textarea{resize:vertical;min-height:78px}
    ============================================================ */
 const APP_VERSION      = '3.4.0';
 const LOGO_B64 = './logo.png';
-const SCHEMA_VERSION   = 8;
+const SCHEMA_VERSION   = 7;
 const DB_NAME          = 'RestaurantePOS_v1_2026';
 const DB_STORE         = 'appdata';
 const DB_KEY           = 'main';
@@ -1288,10 +1288,10 @@ function defaultData() {
     appVersion: APP_VERSION,
     config: { currency:'Q', posCommission:3.5, darkMode:false },
     users: [
-      { id:'admin', username:'admin', passwordHash:'', role:'admin', createdAt:now() },
-      { id:'v1', username:'vendedor1', passwordHash:'', role:'seller', createdAt:now() },
-      { id:'v2', username:'vendedor2', passwordHash:'', role:'seller', createdAt:now() },
-      { id:'v3', username:'vendedor3', passwordHash:'', role:'seller', createdAt:now() }
+      { id:'admin', username:'admin', passwordHash:'', password:'resta2020', role:'admin', createdAt:now() },
+      { id:'v1', username:'vendedor1', passwordHash:'', password:'1234', role:'seller', createdAt:now() },
+      { id:'v2', username:'vendedor2', passwordHash:'', password:'1234', role:'seller', createdAt:now() },
+      { id:'v3', username:'vendedor3', passwordHash:'', password:'1234', role:'seller', createdAt:now() }
     ],
     workers: [],
     tables: generateTables(),
@@ -1410,13 +1410,6 @@ function migrateData(data) {
         }
       });
       v = 7;
-    }
-    if (v < 8) {
-      (data.users || []).forEach(u => {
-        if (u && Object.prototype.hasOwnProperty.call(u, 'password')) delete u.password;
-        u.passwordHash = u.passwordHash || '';
-      });
-      v = 8;
     }
     data.schemaVersion = SCHEMA_VERSION;
     data.appVersion = APP_VERSION;
