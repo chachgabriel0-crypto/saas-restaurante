@@ -640,7 +640,7 @@ let empresasCache = [];
 /* ============================================================
    HELPERS
    ============================================================ */
-function$(id){ return document.getElementById(id); }
+function $(id){ return document.getElementById(id); }
 function fmtDate(iso){
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('es-GT', { day:'2-digit', month:'short', year:'numeric' });
