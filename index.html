@@ -823,10 +823,21 @@ let _saveQueued = false;
    ============================================================ */
 let sb = null;
 let empresaId = null;
+/** Evita mezclar órdenes/datos en memoria entre restaurantes (mismo navegador, otro login). */
+let _workspaceBoundEmpresaId = null;
 let posCloudChannel = null;
 let _posRecoveryListenerRegistered = false;
 /** Evita volver a fusionar el mismo snapshot; push actualiza este valor. */
 let _lastPosWorkspaceUpdatedAt = null;
+
+function bindInMemoryWorkspaceToEmpresa(eid) {
+  if (!eid) return;
+  if (_workspaceBoundEmpresaId === eid) return;
+  _workspaceBoundEmpresaId = eid;
+  DB = migrateData(defaultData());
+  verifyIntegrity();
+  _lastPosWorkspaceUpdatedAt = null;
+}
 /** Sondeo si Realtime no está publicado o falla el canal. */
 let _cloudSyncPollTimer = null;
 
@@ -979,6 +990,7 @@ function applySaaSLoginUI() {
 async function loadCloudSnapshotIntoDB(opts) {
   const force = !!(opts && opts.force);
   if (!sb || !empresaId) return { ok: false, changed: false, error: 'sin sesión nube' };
+  bindInMemoryWorkspaceToEmpresa(empresaId);
   const { data, error } = await sb.from('pos_workspace_state').select('payload, updated_at').eq('empresa_id', empresaId).maybeSingle();
   if (error) {
     ErrorHandler.log('loadCloudSnapshot', error);
@@ -1529,6 +1541,7 @@ async function doLogout() {
   }
   currentUser = null;
   empresaId = null;
+  _workspaceBoundEmpresaId = null;
   sessionStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem('pos_cloud');
   document.getElementById('app').style.display = 'none';
